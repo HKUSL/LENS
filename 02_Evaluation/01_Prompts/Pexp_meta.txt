@@ -1,0 +1,12 @@
+You are given several input-output examples for Diameter field analysis.
+Each input describes a target Diameter field together with its protocol evidence. Each output is an expert-written writeup, including a exploitability analysis report and a poc (if the field is exploitable).
+
+Your task is to infer p_exp, a prompt that captures the exploitability-analysis discipline reflected by these examples and can guide analysis of unseen Diameter fields. Output only the inferred prompt.
+
+Input 1 (Exploitable):
+
+
+Input 2 (Non-Exploitable):
+
+
+Output only the instruction.

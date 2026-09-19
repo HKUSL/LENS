@@ -1,0 +1,55 @@
+{
+  "_comment": "Modbus Register Security Analysis Targets (E model - boundary value / input validation). Seed examples excluded: Read-Holding-Registers+Quantity-of-Registers(#1), Write-Multiple-Coils+Quantity-of-Outputs(#2), Read-Discrete-Inputs+Quantity-of-Inputs(#3), Read-Input-Registers+Starting-Address(#4), Write-Single-Register+Register-Value(#5/SAFE), Write-Single-Coil+Output-Value(#6/SAFE).",
+  "targets": [
+    {"function_code": "Read-Coils", "register": "Starting-Address"},
+    {"function_code": "Read-Coils", "register": "Quantity-of-Coils"},
+    {"function_code": "Read-Coils", "register": "Unit-Identifier"},
+    {"function_code": "Read-Coils", "register": "MBAP-Protocol-Identifier"},
+
+    {"function_code": "Read-Discrete-Inputs", "register": "Starting-Address"},
+    {"function_code": "Read-Discrete-Inputs", "register": "Unit-Identifier"},
+
+    {"function_code": "Read-Holding-Registers", "register": "Starting-Address"},
+    {"function_code": "Read-Holding-Registers", "register": "Unit-Identifier"},
+    {"function_code": "Read-Holding-Registers", "register": "MBAP-Length"},
+
+    {"function_code": "Read-Input-Registers", "register": "Quantity-of-Registers"},
+    {"function_code": "Read-Input-Registers", "register": "Unit-Identifier"},
+
+    {"function_code": "Write-Single-Coil", "register": "Output-Address"},
+    {"function_code": "Write-Single-Coil", "register": "Unit-Identifier"},
+
+    {"function_code": "Write-Single-Register", "register": "Register-Address"},
+    {"function_code": "Write-Single-Register", "register": "Unit-Identifier"},
+
+    {"function_code": "Write-Multiple-Coils", "register": "Starting-Address"},
+    {"function_code": "Write-Multiple-Coils", "register": "Byte-Count"},
+    {"function_code": "Write-Multiple-Coils", "register": "Outputs-Value"},
+    {"function_code": "Write-Multiple-Coils", "register": "Unit-Identifier"},
+
+    {"function_code": "Write-Multiple-Registers", "register": "Starting-Address"},
+    {"function_code": "Write-Multiple-Registers", "register": "Quantity-of-Registers"},
+    {"function_code": "Write-Multiple-Registers", "register": "Byte-Count"},
+    {"function_code": "Write-Multiple-Registers", "register": "Registers-Value"},
+    {"function_code": "Write-Multiple-Registers", "register": "Unit-Identifier"},
+    {"function_code": "Write-Multiple-Registers", "register": "MBAP-Length"},
+
+    {"function_code": "Mask-Write-Register", "register": "Reference-Address"},
+    {"function_code": "Mask-Write-Register", "register": "And-Mask"},
+    {"function_code": "Mask-Write-Register", "register": "Or-Mask"},
+    {"function_code": "Mask-Write-Register", "register": "Unit-Identifier"},
+
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Read-Starting-Address"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Quantity-to-Read"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Write-Starting-Address"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Quantity-to-Write"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Write-Byte-Count"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Write-Registers-Value"},
+    {"function_code": "Read-Write-Multiple-Registers", "register": "Unit-Identifier"},
+
+    {"function_code": "Diagnostics", "register": "Sub-Function"},
+    {"function_code": "Diagnostics", "register": "Data"},
+
+    {"function_code": "Read-FIFO-Queue", "register": "FIFO-Pointer-Address"}
+  ]
+}

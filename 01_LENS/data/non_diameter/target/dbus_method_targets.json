@@ -1,0 +1,37 @@
+{
+  "_comment": "D-Bus method-level security analysis targets. Each target specifies a D-Bus method/property on the system bus that represents a potential attack vector when polkit or bus policy is misconfigured. Grouped by attack category.",
+  "targets": [
+    {"message_type": "MethodCall", "method": "org.freedesktop.systemd1.Manager.StartTransientUnit - create arbitrary transient systemd service, potential RCE as root if manage-units polkit action permits"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.systemd1.Manager.StartUnit - start an existing systemd unit, can re-enable disabled services per systemd D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.systemd1.Manager.StopUnit - stop a running systemd unit, denial-of-service against critical services per systemd D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.systemd1.Manager.SetEnvironment - inject environment variables into systemd manager, affects all subsequently spawned services"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.systemd1.Manager.ReloadUnit - force reload a unit's configuration, may cause service disruption per systemd D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.NetworkManager.Settings.AddConnection - inject rogue network connection profile with attacker-controlled DNS, per NM D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.NetworkManager.Settings.Connection.Update - modify existing network connection settings, DNS/gateway hijacking per NM D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.NetworkManager.Enable - toggle NetworkManager on/off, network DoS per NM D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.Accounts.User.SetPassword - change target user's password hash via AccountsService, credential theft/escalation per accounts-daemon D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.Accounts.CreateUser - create new local user account via AccountsService, persistence mechanism per accounts-daemon D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.Accounts.User.SetAutomaticLogin - enable automatic login for target user, physical access escalation per accounts-daemon D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.PolicyKit1.Authority.RegisterAuthenticationAgent - register rogue polkit auth agent to auto-approve authorization requests, per polkit D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.UDisks2.Block.Format - format a block device, data destruction per UDisks2 D-Bus API (udisks2 project)"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.UDisks2.Filesystem.Mount - mount filesystem with attacker-controlled options (e.g., suid), privilege escalation per UDisks2 D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.login1.Manager.PowerOff - force immediate system shutdown, availability DoS per systemd-logind D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.login1.Manager.Reboot - force immediate system reboot, availability DoS per systemd-logind D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.login1.Manager.TerminateSession - kill an active user session, targeted DoS per systemd-logind D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.login1.Manager.SetWallMessage - set pre-shutdown wall message, social engineering vector per systemd-logind D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.hostname1.SetStaticHostname - change system hostname, identity spoofing and service disruption per systemd-hostnamed D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.timedate1.SetTimezone - change system timezone, log correlation disruption per systemd-timedated D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.timedate1.SetNTP - enable/disable NTP synchronization, time integrity attack per systemd-timedated D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.resolve1.Manager.SetLinkDNS - override per-link DNS server via systemd-resolved, DNS hijacking per resolved D-Bus API"},
+
+    {"message_type": "MethodCall", "method": "org.freedesktop.PackageKit.Transaction.InstallPackages - trigger package installation, supply-chain attack vector per PackageKit D-Bus API"},
+    {"message_type": "MethodCall", "method": "org.freedesktop.PackageKit.Transaction.RemovePackages - remove installed packages, sabotage security tooling per PackageKit D-Bus API"}
+  ]
+}

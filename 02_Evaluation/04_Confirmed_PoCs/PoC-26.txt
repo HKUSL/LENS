@@ -1,0 +1,88 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the normal sender of an `Insert-Subscriber-Data-Request` is the HSS and the victim receiver is the MME. Under the assumed misconfiguration, an Internet attacker can impersonate an HSS, open a Diameter connection directly to the MME, and send forged IDR requests that the MME accepts as authoritative subscriber-profile updates.
+
+- **Attacker Capability:**
+  - The attacker can actively send crafted IDRs and receive the corresponding answers on its own Diameter connection, but cannot observe or alter legitimate HSS<->MME traffic and has no extra NAS/GTP/radio capabilities. If subscriber targeting is needed, the attacker is assumed to know the victim subscriber's IMSI or other identifier used by the MME to bind the IDR to an existing UE context.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.Subscriber-Status` is field-specifically exploitable in this setting because it is not descriptive metadata; it is authoritative HSS provisioning input carried in the profile-update payload of an IDR.
+
+- The field is a 3GPP vendor-specific enumerated AVP inside `Subscription-Data`, with meaningful values such as `SERVICE_GRANTED` and `OPERATOR_DETERMINED_BARRING`. In an S6a IDR, the MME processes `Subscription-Data` as subscriber-state to store or refresh in the UE's local subscription context. If `Subscriber-Status` is present, the MME is expected to overwrite the cached service/barring state for that subscriber with the supplied value.
+
+- The key causal chain is:
+  1. The attacker forges an IDR to the MME for a known subscriber.
+  2. Inside `Subscription-Data`, the attacker sets `Subscriber-Status = OPERATOR_DETERMINED_BARRING`.
+  3. The MME accepts the IDR as HSS-originated provisioning data and updates the subscriber's stored profile.
+  4. On subsequent attach/TAU/service request or other service-authorization decisions, the MME consults that cached subscriber state.
+  5. Because the subscriber is now marked barred, the MME may deny service, reject mobility/service procedures, or prevent normal EPS service continuation.
+
+- This is a concrete field-driven effect: the harmful change comes specifically from the value of `Subscriber-Status`, not merely from the existence of a forged IDR. Changing this field from `SERVICE_GRANTED` to `OPERATOR_DETERMINED_BARRING` directly changes whether the MME considers the subscriber allowed to receive service.
+
+- The attacker does not need any capability beyond sending the forged Diameter request. Unlike a capability-advertisement AVP, this field does not require the attacker to implement any external network function. Its semantics are immediately actionable by the MME as subscriber authorization state.
+
+- The effect is likely persistent for the lifetime of the UE context or until a later legitimate HSS resynchronization overwrites it. That overwrite possibility limits duration but does not remove exploitability, because the forged value can remain in MME subscriber state long enough to cause real denial of service.
+
+### **Attack Procedure:**
+- Establish a Diameter connection to the target MME while impersonating an HSS peer.
+- Send an `Insert-Subscriber-Data-Request` for a known subscriber identity, with the required Diameter routing/session AVPs and a `Subscription-Data` grouped AVP containing `Subscriber-Status = OPERATOR_DETERMINED_BARRING`.
+- Minimal semantically necessary support includes a valid S6a application identifier and a subscriber identifier such as `User-Name` carrying the IMSI, so the MME can map the request to an existing UE context.
+- The expected success condition is that the MME returns a successful IDA and subsequently treats the targeted subscriber as barred, causing denial/reject behavior on later service-related procedures.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["Request", "Proxiable"],
+    "command_code": "Insert-Subscriber-Data",
+    "application_id": "S6a/S6d"
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fakehss.example.net;1729382251;1"
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": "NO_STATE_MAINTAINED"
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "attacker.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.victim.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "victim.example.net"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": "S6a/S6d"
+      }
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "Subscriber-Status": "OPERATOR_DETERMINED_BARRING"
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

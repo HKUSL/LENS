@@ -1,0 +1,66 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the `MME` on `S6a`, and the attacker impersonates the `HSS` to send a forged `Insert-Subscriber-Data-Request` carrying `Subscription-Data` for a known subscriber. Because the MME accepts unauthenticated Diameter requests on this exposed interface, it treats the request as an authoritative HSS-initiated subscriber-profile update.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send crafted `IDR` requests, and receive the corresponding answers. The attacker does not need radio, GTP, NAS, or visibility into legitimate HSS-MME traffic; knowledge of the target subscriber identity and ability to supply a coherent `Subscription-Data` tree is sufficient.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.APN-Configuration-Profile.APN-Configuration.AMBR.Max-Requested-Bandwidth-DL` is a 3GPP vendor-specific `Unsigned32` provisioning AVP nested under an APN-specific `AMBR` container. In `IDR`, this is not descriptive peer metadata; it is authoritative subscriber data that the MME updates into its cached APN profile for the targeted UE.
+- The field is control-relevant because changing this leaf changes the downlink component of the APN Aggregate Maximum Bit Rate for the selected `APN-Configuration` instance, identified by sibling AVPs such as `Context-Identifier` and `Service-Selection`. The MME later reuses that stored value when handling PDN connectivity and bearer/session procedures for that APN.
+- A forged low value can therefore poison subscriber state and cause APN-specific throughput degradation or effective service denial for later sessions; a forged high value can attempt to relax throughput policy if downstream nodes honor the subscription-derived AMBR. The key incremental effect comes from this field's value itself: the forged `IDR` provides the vehicle, but this AVP determines the specific QoS/bandwidth outcome.
+- The effect is realistic under the threat model because the attacker does not need any extra capability beyond getting the MME to accept the forged HSS update. The MME operationalizes the stored APN AMBR through normal EPC control-plane procedures toward serving/pdn gateways. Actual end-to-end enforcement may be bounded by downstream policy, but concrete negative impact from a maliciously reduced DL AMBR is well supported.
+- The change is likely persistent for the lifetime of the subscriber context in the MME and remains until a later legitimate HSS synchronization, detach/reattach refresh, or context rebuild overwrites it. That overwrite path limits duration but does not negate the field-specific state-poisoning effect.
+
+### **Attack Procedure:**
+- Craft a forged `S6a Insert-Subscriber-Data-Request` from the attacker-controlled Diameter connection to the MME with normal routing/base AVPs, the target subscriber in `User-Name`, and a coherent `Subscription-Data` tree.
+- Under `APN-Configuration-Profile`, include one `APN-Configuration` for the target APN with `Context-Identifier`, `Service-Selection`, `PDN-Type`, and an `AMBR` grouped AVP containing both `Max-Requested-Bandwidth-UL` and a maliciously low `Max-Requested-Bandwidth-DL`.
+- The expected success condition is that the MME accepts the `IDR` and stores the modified APN profile; subsequent PDN/bearer handling for that APN reflects the poisoned downlink AMBR, producing subscriber-visible throughput restriction or service degradation.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    { "Session-Id": "attacker-hss.example;123456789" },
+    { "Auth-Session-State": 1 },
+    {
+      "Vendor-Specific-Application-Id": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "Origin-Host": "hss.attacker.example" },
+    { "Origin-Realm": "attacker.example" },
+    { "Destination-Host": "mme01.epc.example" },
+    { "Destination-Realm": "epc.example" },
+    { "User-Name": "001010123456789" },
+    {
+      "Subscription-Data": {
+        "APN-Configuration-Profile": {
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "PDN-Type": 0,
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 50000000,
+                "Max-Requested-Bandwidth-DL": 1
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+`EXPLOITABLE`

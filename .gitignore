@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Generated experiment outputs
+01_LENS/output/
+output/
+
+# Demonstration videos are hosted externally
+03_Demo_Video/Video/
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

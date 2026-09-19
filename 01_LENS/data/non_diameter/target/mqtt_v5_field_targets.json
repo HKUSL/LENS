@@ -1,0 +1,82 @@
+{
+  "_comment": "MQTT Field Security Analysis Targets. Merged MQTT v3.1.1 core fields and MQTT v5.0 client-sendable properties.",
+  "targets": [
+    {"message": "CONNECT", "field": "Protocol Name"},
+    {"message": "CONNECT", "field": "Protocol Level"},
+    {"message": "CONNECT", "field": "Clean Session"},
+    {"message": "CONNECT", "field": "Will Flag"},
+    {"message": "CONNECT", "field": "Will QoS"},
+    {"message": "CONNECT", "field": "Will Retain"},
+    {"message": "CONNECT", "field": "Will Message"},
+    {"message": "CONNECT", "field": "Username"},
+    {"message": "CONNECT", "field": "Password"},
+    {"message": "CONNECT", "field": "Session Expiry Interval"},
+    {"message": "CONNECT", "field": "Receive Maximum"},
+    {"message": "CONNECT", "field": "Maximum Packet Size"},
+    {"message": "CONNECT", "field": "Topic Alias Maximum"},
+    {"message": "CONNECT", "field": "Authentication Method"},
+    {"message": "CONNECT", "field": "Authentication Data"},
+    {"message": "CONNECT", "field": "Request Response Information"},
+    {"message": "CONNECT", "field": "Request Problem Information"},
+    {"message": "CONNECT", "field": "User Property"},
+
+    {"message": "CONNECT", "field": "Will Delay Interval"},
+    {"message": "CONNECT", "field": "Will Payload Format Indicator"},
+    {"message": "CONNECT", "field": "Will Message Expiry Interval"},
+    {"message": "CONNECT", "field": "Will Content Type"},
+    {"message": "CONNECT", "field": "Will Response Topic"},
+    {"message": "CONNECT", "field": "Will Correlation Data"},
+    {"message": "CONNECT", "field": "Will User Property"},
+
+    {"message": "PUBLISH", "field": "DUP Flag"},
+    {"message": "PUBLISH", "field": "Retain Flag"},
+    {"message": "PUBLISH", "field": "Payload"},
+    {"message": "PUBLISH", "field": "Packet Identifier"},
+    {"message": "PUBLISH", "field": "Topic Alias"},
+    {"message": "PUBLISH", "field": "Message Expiry Interval"},
+    {"message": "PUBLISH", "field": "Response Topic"},
+    {"message": "PUBLISH", "field": "Correlation Data"},
+    {"message": "PUBLISH", "field": "Content Type"},
+    {"message": "PUBLISH", "field": "Payload Format Indicator"},
+    {"message": "PUBLISH", "field": "User Property"},
+
+    {"message": "SUBSCRIBE", "field": "Requested QoS"},
+    {"message": "SUBSCRIBE", "field": "Packet Identifier"},
+    {"message": "SUBSCRIBE", "field": "Subscription Identifier"},
+    {"message": "SUBSCRIBE", "field": "No Local"},
+    {"message": "SUBSCRIBE", "field": "Retain As Published"},
+    {"message": "SUBSCRIBE", "field": "Retain Handling"},
+    {"message": "SUBSCRIBE", "field": "User Property"},
+
+    {"message": "UNSUBSCRIBE", "field": "Topic Filter"},
+    {"message": "UNSUBSCRIBE", "field": "Packet Identifier"},
+    {"message": "UNSUBSCRIBE", "field": "User Property"},
+
+    {"message": "DISCONNECT", "field": "Reason Code"},
+    {"message": "DISCONNECT", "field": "Session Expiry Interval"},
+    {"message": "DISCONNECT", "field": "Reason String"},
+    {"message": "DISCONNECT", "field": "User Property"},
+
+    {"message": "AUTH", "field": "Authentication Method"},
+    {"message": "AUTH", "field": "Authentication Data"},
+    {"message": "AUTH", "field": "Reason Code"},
+    {"message": "AUTH", "field": "Reason String"},
+    {"message": "AUTH", "field": "User Property"},
+
+    {"message": "PUBREL", "field": "Reason Code"},
+    {"message": "PUBREL", "field": "Reason String"},
+    {"message": "PUBREL", "field": "User Property"},
+
+    {"message": "PUBACK", "field": "Reason Code"},
+    {"message": "PUBACK", "field": "Reason String"},
+    {"message": "PUBACK", "field": "User Property"},
+
+    {"message": "PUBREC", "field": "Reason Code"},
+    {"message": "PUBREC", "field": "Reason String"},
+    {"message": "PUBREC", "field": "User Property"},
+
+    {"message": "PUBCOMP", "field": "Reason Code"},
+    {"message": "PUBCOMP", "field": "Reason String"},
+    {"message": "PUBCOMP", "field": "User Property"}
+  ]
+}

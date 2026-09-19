@@ -1,0 +1,46 @@
+{
+  "gpt5.4": {
+    "type": "openai",
+    "keys": [
+      "<OPENAI_API_KEY>"
+    ],
+    "base_url": "https://api.openai.com/v1",
+    "default_model": "gpt-5.4",
+    "web_search_backend": "responses",
+    "access_requirement": "Use official OpenAI API access in compliance with applicable terms and cybersecurity policies."
+  },
+  "gemini": {
+    "type": "gemini",
+    "keys": [
+      "<GEMINI_API_KEY>"
+    ],
+    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+    "default_model": "gemini-3.1-pro-preview",
+    "web_search_backend": "gemini",
+    "access_requirement": "Use official Google API access in compliance with applicable terms and cybersecurity policies."
+  },
+  "claude": {
+    "type": "anthropic",
+    "keys": [
+      "<ANTHROPIC_API_KEY>"
+    ],
+    "base_url": "https://api.anthropic.com/v1",
+    "default_model": "claude-opus-4-6",
+    "web_search_backend": "anthropic",
+    "anthropic_version": "2023-06-01",
+    "web_search_tool": "web_search_20250305",
+    "web_search_max_uses": 5,
+    "max_output_tokens": 16384,
+    "access_requirement": "Use official Anthropic API access in compliance with applicable terms and cybersecurity policies."
+  },
+  "glm": {
+    "type": "openai_compatible",
+    "keys": [
+      "<ZHIPU_API_KEY>"
+    ],
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "default_model": "glm-5.2",
+    "web_search_backend": "chat_tool",
+    "max_output_tokens": 16384
+  }
+}

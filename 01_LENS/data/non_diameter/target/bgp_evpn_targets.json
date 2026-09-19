@@ -1,0 +1,36 @@
+{
+  "_comment": "BGP EVPN (RFC 7432) Security Analysis Targets. Scope: EVPN Route Types 1-5, extended communities, and VXLAN data plane interactions. Message types: EVPN-UPDATE. Seed examples excluded: mac-ip-route-type2-spoofing(#1), ip-prefix-route-type5-hijack(#2), mac-mobility-sequence-hijack(#3), inclusive-multicast-type3-bum-flood(#4), arp-suppression-bypass(#5), ethernet-segment-type1-dos(#6).",
+  "targets": [
+    {"message_type": "EVPN-UPDATE", "attribute": "type2.mac-ip-spoofing-cross-evi"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type2.mac-only-flood-amplification"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type2.ip-duplicate-detection-evasion"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type2.gateway-mac-override"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "type5.default-route-injection"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type5.overlapping-prefix-hijack"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type5.router-mac-spoofing"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "type1.ead-per-es-mass-withdrawal"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type1.aliasing-load-balance-abuse"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type1.df-election-manipulation"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "type3.multicast-join-unauthorized-evi"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type3.pmsi-tunnel-redirect"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "type4.es-route-esi-spoofing"},
+    {"message_type": "EVPN-UPDATE", "attribute": "type4.df-election-priority-manipulation"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "mac-mobility.rapid-flapping-dos"},
+    {"message_type": "EVPN-UPDATE", "attribute": "mac-mobility.sticky-mac-override"},
+    {"message_type": "EVPN-UPDATE", "attribute": "mac-mobility.sequence-overflow"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "arp-nd-suppression.nd-cache-poisoning"},
+    {"message_type": "EVPN-UPDATE", "attribute": "arp-nd-suppression.gratuitous-arp-injection"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "route-target.cross-tenant-rt-leak"},
+    {"message_type": "EVPN-UPDATE", "attribute": "route-target.rt-import-hijack"},
+
+    {"message_type": "EVPN-UPDATE", "attribute": "vxlan.vni-hopping"},
+    {"message_type": "EVPN-UPDATE", "attribute": "vxlan.inner-header-spoofing"}
+  ]
+}

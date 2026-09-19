@@ -1,0 +1,58 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the `MME` on the `S6a` interface. An Internet attacker can impersonate the `HSS` and send a forged `Insert-Subscriber-Data-Request (IDR)` directly to that `MME`, which accepts the request as trusted subscriber-profile input for the targeted UE.
+
+- **Attacker Capability:**
+  - The attacker can establish its own unauthenticated Diameter connection to the `MME`, send crafted `IDR` requests, and receive the corresponding answers. The attacker knows the subscriber identity needed to target the UE, but cannot observe or modify legitimate `HSS`-`MME` traffic and has no extra EPC, radio, or policy-node control beyond the forged `S6a` request itself.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.AMBR.Max-Requested-Bandwidth-DL` is authoritative subscriber provisioning data inside `IDR`, not descriptive metadata. It sits under `Subscription-Data -> AMBR` and is interpreted by the `MME` as the subscribed downlink aggregate maximum bit rate for non-GBR service.
+- If a forged `IDR` is accepted, the `MME` updates the UE's stored subscription context with the attacker-supplied `AMBR` values. Changing this specific leaf AVP changes the downlink component of that stored policy state, while leaving the rest of the procedure unchanged.
+- The field-specific causal chain is concrete: forged `IDR` -> `MME` stores altered DL `AMBR` -> later bearer/PDN/session procedures reuse the updated subscribed AMBR -> downstream EPC enforcement or signaling applies the reduced or inflated aggregate DL limit -> the subscriber experiences throttling, degraded non-GBR throughput, or altered QoS treatment.
+- This is field-specific exploitability because the harmful effect depends on the value of `Max-Requested-Bandwidth-DL` itself. A forged `IDR` is broadly dangerous, but this field independently controls one particular subscriber policy parameter: the downlink aggregate bitrate ceiling.
+- The effect is not merely hypothetical sender-claimed capability. The attacker does not need extra powers outside the threat model; once the `MME` accepts the forged provisioning update, legitimate later EPC procedures can consume the poisoned value.
+- The impact is usually persistent within the serving `MME`'s UE context until detach, purge, restart, a fresh attach/TAU subscription download, or a later legitimate `IDR` overwrites it. That overwrite path limits duration but does not negate the concrete field-driven service impact.
+
+### **Attack Procedure:**
+- Craft a forged `S6a` `Insert-Subscriber-Data-Request` from the fake `HSS` to the target `MME` with the targeted subscriber identity and a `Subscription-Data` grouped AVP containing `AMBR`.
+- Inside `AMBR`, include both `Max-Requested-Bandwidth-UL` and `Max-Requested-Bandwidth-DL`, setting the target field to a maliciously low downlink value such as `1` or another throttling value that is syntactically valid.
+- Keep the rest of the request minimal but valid: include standard `IDR` routing/session AVPs and the required grouped ancestors so the `MME` can bind the update to the active UE context.
+- Observable success condition: the `MME` returns a successful `IDA`, stores the modified subscription data, and the subscriber later experiences reduced non-GBR downlink throughput when the updated AMBR is used in bearer/session handling.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    { "Session-Id": "attacker-hss.example.net;1710000001;12345" },
+    {
+      "Vendor-Specific-Application-Id": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "Auth-Session-State": 1 },
+    { "Origin-Host": "fake-hss.example.net" },
+    { "Origin-Realm": "example.net" },
+    { "Destination-Host": "mme01.example.net" },
+    { "Destination-Realm": "example.net" },
+    { "User-Name": "001010123456789" },
+    {
+      "Subscription-Data": {
+        "AMBR": {
+          "Max-Requested-Bandwidth-UL": 1000000,
+          "Max-Requested-Bandwidth-DL": 1
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+`EXPLOITABLE`

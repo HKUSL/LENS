@@ -1,0 +1,101 @@
+**Threat Model:**
+
+- **Attack Assumption:**  
+  A publicly reachable **MME** exposes the **S6a** Diameter interface and accepts unauthenticated Diameter peer connections. The attacker can impersonate the **HSS** role and send a forged **Insert-Subscriber-Data-Request (IDR)** to that MME for a known subscriber.
+
+- **Attacker Capability:**  
+  The attacker can open its own Diameter connection to the victim MME, send crafted **IDR** requests, and receive the corresponding answers. The attacker cannot interfere with legitimate HSS<->MME traffic, cannot control radio access behavior directly, and has no SGW/PGW/bearer-plane position. The attack must therefore succeed through **MME processing of the target AVP itself**.
+
+**Exploitability Analysis:**
+
+`Subscription-Data.Regional-Subscription-Zone-Code` is field-specific exploitable under this threat model.
+
+On S6a, **IDR is sent from HSS to MME**, and `Regional-Subscription-Zone-Code` is carried inside the mandatory `Subscription-Data` grouped AVP. The AVP is not descriptive metadata: it is **authoritative subscriber restriction data** delivered by the HSS to the MME. The evidence states that when the MME receives this AVP, it shall **replace its stored zone-code set** with the received values rather than append to existing data. That gives the field direct write effect on **stored per-subscriber MME state**.
+
+The field semantics are security-relevant. A zone code represents a regional subscription zone tied to collections of TAs/RAs, and the serving node uses stored administrative information to determine whether the UE is allowed or disallowed in particular areas. Later, during **Attach** and **TAU** processing, the MME validates the UE's presence in the current/new TA against regional subscription restrictions. If the UE is not allowed in that TA, the MME rejects the procedure. Thus, changing the value of this specific AVP can change whether the UE is accepted or rejected in particular tracking areas.
+
+That is distinct from the generic harm of forging an IDR. The enclosing forged IDR merely provides a vehicle for subscriber-data update. The **field-specific** impact is that this AVP changes the subscriber's **regional restriction set**, which in turn changes later **mobility authorization outcomes**. This can produce a concrete denial-of-service effect: denial of attach or TAU in specific areas, or altered mobility behavior tied to area restrictions. The effect is attributable to the value of `Regional-Subscription-Zone-Code` itself.
+
+The state scope is **subscriber-wide within the serving MME context**, not bearer- or APN-specific. The bad state persists until a later legitimate IDR overwrites it, or until MME context removal/reset clears it. So the impact is not merely transient parsing of one request; it is a stored condition that can affect later NAS procedures.
+
+There are two important limits, but they do not negate exploitability here:
+
+1. If the MME implementation does **not support regional subscription**, it may ignore/store nothing, so the attack may be ineffective on such nodes.
+2. The mapping from a given zone code to actual allowed/disallowed TAs is implementation- and operator-dependent, so an attacker needs an operator-plausible zone code that maps differently from the legitimate one.
+
+Even with those caveats, the protocol evidence supports a clear exploit chain: forged HSS-originated IDR -> MME replaces stored regional zone codes -> later attach/TAU area check uses that state -> UE rejected or mobility restricted in affected areas. That satisfies field-specific exploitability.
+
+**Attack Procedure:**
+
+Craft a minimal but coherent **S6a Insert-Subscriber-Data-Request** from the attacker-controlled HSS-side connection to the target MME. Include only the mandatory top-level AVPs and the grouped `Subscription-Data` container needed to carry the target field; unrelated AVPs are excluded.
+
+Set the target field `Subscription-Data.Regional-Subscription-Zone-Code` to a **malicious alternate Zone Code** value, chosen to map to a different regional restriction policy in the victim operator environment. Because receiver behavior is **replacement**, supplying one or more attacker-chosen zone codes is sufficient to overwrite the subscriber's previously stored set if the MME accepts partial subscription-data updates.
+
+The `User-Name` must identify a subscriber currently known to the MME or later attaching through it. The expected success condition is not merely receipt of an IDA, but that the MME stores the substituted zone-code set and subsequently rejects the subscriber's **Attach** or **TAU** in a TA whose authorization outcome changes because of the injected zone code.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000001;12345"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.com"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avp": [
+        {
+          "avp_name": "Regional-Subscription-Zone-Code",
+          "avp_value": "3031"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**  
+EXPLOITABLE

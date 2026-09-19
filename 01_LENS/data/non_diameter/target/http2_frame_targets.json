@@ -1,0 +1,47 @@
+{
+  "_comment": "HTTP/2 Frame Field Security Analysis Targets (RFC 9113, RFC 7541). Frame types: HEADERS (client request initiation), CONTINUATION (header block continuation), DATA (request/response payload), SETTINGS (connection configuration), WINDOW_UPDATE (flow control), RST_STREAM (stream cancellation), GOAWAY (connection shutdown), PRIORITY (stream prioritization), PUSH_PROMISE (server push), PING (keepalive/RTT). Seed examples excluded: HEADERS/transfer-encoding(#1), HEADERS/:authority(#2), HEADERS/:path(#3), HEADERS/content-length(#4), WINDOW_UPDATE/Window-Size-Increment(#5), PING/Opaque-Data(#6).",
+  "targets": [
+    {"frame_type": "HEADERS", "field": ":method"},
+    {"frame_type": "HEADERS", "field": ":scheme"},
+    {"frame_type": "HEADERS", "field": "host"},
+    {"frame_type": "HEADERS", "field": "te"},
+    {"frame_type": "HEADERS", "field": "connection"},
+    {"frame_type": "HEADERS", "field": "upgrade"},
+    {"frame_type": "HEADERS", "field": "cookie"},
+    {"frame_type": "HEADERS", "field": "proxy-connection"},
+    {"frame_type": "HEADERS", "field": "keep-alive"},
+    {"frame_type": "HEADERS", "field": "Priority-Weight"},
+    {"frame_type": "HEADERS", "field": "Stream-Dependency"},
+    {"frame_type": "HEADERS", "field": "HPACK-Dynamic-Table-Size-Update"},
+    {"frame_type": "HEADERS", "field": "HPACK-Huffman-Encoded-String"},
+
+    {"frame_type": "SETTINGS", "field": "SETTINGS_HEADER_TABLE_SIZE"},
+    {"frame_type": "SETTINGS", "field": "SETTINGS_ENABLE_PUSH"},
+    {"frame_type": "SETTINGS", "field": "SETTINGS_MAX_CONCURRENT_STREAMS"},
+    {"frame_type": "SETTINGS", "field": "SETTINGS_INITIAL_WINDOW_SIZE"},
+    {"frame_type": "SETTINGS", "field": "SETTINGS_MAX_FRAME_SIZE"},
+    {"frame_type": "SETTINGS", "field": "SETTINGS_MAX_HEADER_LIST_SIZE"},
+    {"frame_type": "SETTINGS", "field": "Unknown-Setting-Identifier"},
+
+    {"frame_type": "DATA", "field": "Padding-Length"},
+    {"frame_type": "DATA", "field": "END_STREAM-Flag"},
+
+    {"frame_type": "CONTINUATION", "field": "Header-Block-Fragment"},
+
+    {"frame_type": "RST_STREAM", "field": "Error-Code"},
+
+    {"frame_type": "WINDOW_UPDATE", "field": "Zero-Increment"},
+    {"frame_type": "WINDOW_UPDATE", "field": "Overflow-Increment"},
+
+    {"frame_type": "GOAWAY", "field": "Last-Stream-ID"},
+    {"frame_type": "GOAWAY", "field": "Error-Code"},
+    {"frame_type": "GOAWAY", "field": "Debug-Data"},
+
+    {"frame_type": "PRIORITY", "field": "Stream-Dependency"},
+    {"frame_type": "PRIORITY", "field": "Weight"},
+    {"frame_type": "PRIORITY", "field": "Exclusive-Flag"},
+
+    {"frame_type": "PUSH_PROMISE", "field": "Promised-Stream-ID"},
+    {"frame_type": "PUSH_PROMISE", "field": "Header-Block-Fragment"}
+  ]
+}

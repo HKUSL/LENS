@@ -1,0 +1,55 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **HSS** on the **Cx** interface. Due to exposure/misconfiguration, an Internet attacker can impersonate an expected **S-CSCF** and send a forged **Server-Assignment-Request (SAR)** directly to the HSS, which accepts it as a valid Cx request.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the HSS, send arbitrary SAR requests, and receive the corresponding SAA answers. The attacker does not observe or alter legitimate Diameter links and has no extra SIP/IMS data-plane control unless independently implied by the forged values. The attacker knows the target subscriber identity needed in `User-Name` and, where needed, `Public-Identity`.
+
+### **Exploitability Analysis:**
+`Server-Assignment-Type` is a **top-level, vendor-specific 3GPP Enumerated AVP** in `Server-Assignment-Request`, and it is functionally mandatory because it tells the HSS which server-assignment operation to perform. This is not descriptive metadata: the HSS uses it as **authoritative control input** to choose among materially different RE_REGISTRATION-state transitions.
+
+The field is therefore **field-specifically exploitable** under the stated threat model. If the attacker sends a forged SAR with a malicious `Server-Assignment-Type`, the HSS will branch into different processing paths for the targeted IMS subscriber. In particular, choosing a de-RE_REGISTRATION, timeout-removal, or administrative-removal style value can cause the HSS to clear or invalidate the subscriber's stored S-CSCF binding and IMS UNREGISTERED_USER state; choosing a UNREGISTERED_USER or re-UNREGISTERED_USER style value can create or refresh a binding to the attacker-chosen `Server-Name`; and choosing a profile-restoration style value can induce profile delivery behavior. The incremental harm comes from **which action the HSS takes**, and that is selected by this AVP.
+
+The causal chain is direct: **forged SAR accepted by HSS -> HSS reads `Server-Assignment-Type` -> HSS updates subscriber IMS RE_REGISTRATION/assignment state accordingly -> later IMS control-plane behavior consumes that poisoned state -> subscriber-visible IMS disruption or misbinding occurs**. A malicious de-RE_REGISTRATION-type value yields a concrete service-denial outcome even without any additional attacker-controlled IMS infrastructure, because the HSS itself removes or invalidates the serving assignment. That makes the field independently security-relevant, not merely incidental to the SAR procedure.
+
+There is an attacker-realizability limit for interception-style outcomes: if the attacker sets a RE_REGISTRATION-style assignment toward an attacker-chosen `Server-Name` but does not actually control that S-CSCF or routing path, full service takeover may not be realizable. However, this does **not** defeat exploitability overall, because de-RE_REGISTRATION/removal values still create concrete field-driven harm entirely within the HSS's own stored state. The poisoned state is persistent until overwritten by later legitimate re-RE_REGISTRATION, timeout handling, administrative cleanup, or another valid assignment event.
+
+### **Attack Procedure:**
+Craft a forged **Cx Server-Assignment-Request** from the attacker-controlled Diameter connection to the HSS, including the minimal mandatory AVPs: `Session-Id`, `Vendor-Specific-Application-Id` (with Vendor-Id `10415` and Cx/Dx application id), `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, typically `Destination-Host`, `User-Name`, `Server-Name`, and the target `Server-Assignment-Type`. Include `Public-Identity` where needed for coherent subscriber selection.
+
+Set `Server-Assignment-Type` to a **de-UNREGISTERED_USER / timeout / administrative-removal** style enumerated value supported by the target release. The expected success condition is that the HSS returns a successful SAA and thereafter the targeted subscriber's IMS RE_REGISTRATION/binding state is cleared or altered, causing loss of IMS UNREGISTERED_USER continuity or service until legitimate re-UNREGISTERED_USER restores state.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": "Server-Assignment",
+    "application_id": "CxDx",
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker.example.net;1720451000;1" },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": "CxDx"
+      }
+    },
+    { "name": "Auth-Session-State", "value": "NO_STATE_MAINTAINED" },
+    { "name": "Origin-Host", "value": "scscf.attacker.example.net" },
+    { "name": "Origin-Realm", "value": "attacker.example.net" },
+    { "name": "Destination-Realm", "value": "ims.mnc001.mcc001.3gppnetwork.org" },
+    { "name": "Destination-Host", "value": "hss01.ims.mnc001.mcc001.3gppnetwork.org" },
+    { "name": "User-Name", "value": "sip:imsi001010123456789@ims.mnc001.mcc001.3gppnetwork.org" },
+    { "name": "Public-Identity", "value": "sip:user1@ims.mnc001.mcc001.3gppnetwork.org" },
+    { "name": "Server-Name", "value": "scscf.attacker.example.net" },
+    { "name": "Server-Assignment-Type", "value": "UNREGISTERED_USER " },
+    { "name": "User-Data-Already-Available", "value": "0" }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

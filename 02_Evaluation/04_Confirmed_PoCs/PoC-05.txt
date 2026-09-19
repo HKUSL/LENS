@@ -1,0 +1,87 @@
+## **Threat Model:**
+- **Attack Assumption:** An Internet attacker can directly connect to a misconfigured `HSS` Diameter endpoint exposed on `S6a`, impersonate a trusted `MME/SGSN`, and send a syntactically valid `Authentication-Information-Request (AIR)` under the `S6a/S6d` application context. The `HSS` does not authenticate the peer with `IPsec/TLS` and returns the corresponding `Authentication-Information-Answer (AIA)` on that same attacker-controlled connection.
+- **Attacker Capability:** The attacker actively sends one crafted `AIR` on its own Diameter connection and passively receives only the resulting `AIA` on that connection. The attacker cannot observe or modify traffic between legitimate `MME/SGSN` and `HSS`, but may know the target subscriber identifier needed for the procedure, such as the subscriber `User-Name` derived from the `IMSI`.
+
+## **Exploitability Analysis:**
+`Authentication-Info.E-UTRAN-Vector.XRES` is an Answer-side disclosure from the `HSS` in `AIA` for command code `318` and application id `16777251`. The documented triggering request is `AIR` from the serving node role (`MME/SGSN`) to the `HSS`. Under the stated threat model, a spoofed peer is accepted because the attacker establishes its own direct Diameter connection and the victim processes attacker-crafted `AIR` messages as if they originated from a trusted `MME/SGSN`.
+
+The target AVP is request-triggerable under the provided protocol conditions. `Authentication-Info` is conditionally present in a successful `AIA`, and for the EPS case the normative request-side trigger is inclusion of `Requested-EUTRAN-Authentication-Info` in the `AIR`. A valid request also needs the normal S6a application context and processable subscriber/routing AVPs, specifically `Vendor-Specific-Application-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, `User-Name`, and `Visited-PLMN-Id`; `Destination-Host` is deployment-dependent but commonly useful. Within `Requested-EUTRAN-Authentication-Info`, `Number-Of-Requested-Vectors` is the key parameter that causes the `HSS` to generate one or more `E-UTRAN-Vector` instances. On successful processing for an existing subscriber, the `AIA` includes `Authentication-Info`, each `E-UTRAN-Vector` includes `RAND`, `XRES`, `AUTN`, and `KASME`, and the target `XRES` appears inside each returned vector.
+
+The disclosure has clear security value. `XRES` is not routine status metadata; it is subscriber-specific EPS AKA authentication material. The same returned vector also exposes `RAND`, `AUTN`, and `KASME`, which together constitute core authentication and keying data used by the serving node during AKA. Disclosure therefore reveals cryptographic material tied to the identified subscriber and a specific challenge set, enabling strong subscriber correlation and materially assisting targeted follow-on attacks that rely on possession of authentication vectors or derived security context data. This meets the threshold for meaningful information disclosure.
+
+## **Attack Procedure:**
+- Craft one `Authentication-Information-Request (AIR)` for command code `318` and application id `16777251` using the `S6a/S6d` application context.
+- Include the minimal processable AVPs for S6a routing and subscriber identification: `Session-Id`, `Vendor-Specific-Application-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, `Destination-Host` if needed by deployment, `User-Name`, and `Visited-PLMN-Id`.
+- Include `Requested-EUTRAN-Authentication-Info` with at least `Number-Of-Requested-Vectors` set to a positive integer such as `1`; this is the exact request-side trigger for `E-UTRAN-Vector` generation.
+- Send the crafted `AIR` to the victim `HSS` over the attacker-controlled Diameter connection and receive the corresponding `AIA` on that same connection.
+- Treat the attack as successful when the returned `AIA` indicates success and contains `Authentication-Info` with at least one non-empty `E-UTRAN-Vector` carrying a populated `XRES`.
+
+## **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "command_code": 318,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "mme01.epc.mnc001.mcc001.3gppnetwork.org;123456789"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "mme01.epc.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "epc.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss01.epc.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789@epc.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Visited-PLMN-Id",
+      "avp_value": "00101"
+    },
+    {
+      "avp_name": "Requested-EUTRAN-Authentication-Info",
+      "grouped_avp": [
+        {
+          "avp_name": "Number-Of-Requested-Vectors",
+          "avp_value": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+## **Classification:**
+EXPLOITABLE

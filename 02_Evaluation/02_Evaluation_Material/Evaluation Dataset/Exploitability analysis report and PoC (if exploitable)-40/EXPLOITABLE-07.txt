@@ -1,0 +1,118 @@
+**Threat Model:**
+
+- **Attack Assumption:**  
+  A publicly reachable **MME** exposes its **S6a Diameter** interface due to misconfiguration. The attacker can impersonate the expected **HSS** role, establish an unauthenticated Diameter connection to the MME, and send a forged **Delete-Subscriber-Data-Request (DSR)** for a known subscriber IMSI in `User-Name`.
+
+- **Attacker Capability:**  
+  The attacker can send crafted **DSR requests** and receive the corresponding **DSA answers** on the attacker-controlled connection only. The attacker cannot observe or alter legitimate HSS<->MME traffic, and has no radio, bearer-plane, SGW/PGW, or UE-side control. The analysis is therefore limited to what the **MME itself** does when it processes the forged `DSR-Flags` value.
+
+**Exploitability Analysis:**
+
+`DSR-Flags` is independently exploitable under this threat model because it is the **authoritative deletion bitmap** that tells the MME **which stored subscriber data categories to remove**. This is not descriptive metadata and not a mere capability indicator: TS 29.272 defines it as a mandatory `Unsigned32` AVP in the **request**, and the MME processes it normatively to perform specific deletions.
+
+Directionally, this is an **HSS->MME request** on S6a. The target field is a **top-level AVP** in `Delete-Subscriber-Data-Request`; there is no grouped parent. The MME first validates that the subscriber identified by `User-Name` is known. If so, it applies the deletion semantics selected by the bits in `DSR-Flags`. The standards evidence explicitly states that the MME shall delete the corresponding data according to the request, subject to a few constrained validation rules such as rejecting complete APN-profile withdrawal or default-APN deletion by context identifier.
+
+The field-specific exploit path is concrete:
+
+1. The attacker forges a valid DSR naming a real IMSI.
+2. The attacker chooses a **specific deletion bit** in `DSR-Flags`, rather than relying on generic "some DSR happened" behavior.
+3. The MME deletes the corresponding stored subscriber data for that subscriber.
+4. Later behavior changes because the deleted data are operationally consumed by EPS/session handling and service logic.
+
+A particularly clear standards-backed case is **PDN subscription contexts Withdrawal**, combined with a valid non-default `Context-Identifier`. In that case, `DSR-Flags` selects deletion of a specific per-subscriber PDN subscription context cached in the MME. That state is keyed by `Context-Identifier`, so the impact is scoped and attributable to the chosen flag value plus the selector. This deleted state is not transient parser state; it is subscriber data retained by the MME until refreshed or reprovisioned. Its loss can affect later PDN connectivity for that APN and, where the deleted EPS subscription data are associated with active bearers, the MME may deactivate affected active EPS bearers. That in turn can propagate into bearer teardown such as GTPv2-C Delete Session procedures.
+
+This is materially different from the generic fact that "forging a DSR is bad." The distinct security effect comes from **which bits are set in `DSR-Flags`**:
+- one value can withdraw a specific non-default PDN subscription context;
+- another can withdraw trace data only;
+- another can target SMS/LCS-related state;
+- another may affect different stored subscription attributes.
+
+So the **semantic payload of the attack** is carried by `DSR-Flags` itself. The field controls deletion scope and therefore changes the resulting subscriber impact.
+
+The impact is security-relevant because it can cause:
+- **persistent MME-side corruption/deletion of subscriber state** for the named user;
+- **service denial** for a selected APN/PDN context on subsequent use;
+- possible **immediate bearer disruption** if the removed EPS subscription data affect active EPS bearers.
+
+Recovery is not immediate. The deleted data remain absent until a later legitimate **Insert-Subscriber-Data-Request**, attach/update-driven refresh, or other reprovisioning event restores them. Thus the attacker can create a stale deleted-state condition that persists beyond the single forged request.
+
+Constraints in the spec do not negate exploitability; they only narrow valid test cases. For example, the MME will refuse deletion if the `Context-Identifier` maps to the default APN configuration, and will reject complete APN configuration profile withdrawal. Those checks mean the attacker should choose a **valid non-default context**, not that `DSR-Flags` is harmless.
+
+**Attack Procedure:**
+
+1. Establish a Diameter connection to the target **MME** while impersonating an HSS peer.
+2. Send a forged **Delete-Subscriber-Data-Request** with the mandatory S6a AVPs only, plus the conditional AVP needed to make the selected `DSR-Flags` bit meaningful.
+3. Use `User-Name` set to a known subscriber IMSI.
+4. Set `DSR-Flags` to the bit value corresponding to **PDN subscription contexts Withdrawal**.
+5. Include a valid non-default `Context-Identifier` for a secondary APN/PDN subscription context of that subscriber.
+6. Exclude unrelated optional AVPs and unrelated deletion selectors to keep the packet minimal and coherent.
+
+This test value is malicious because it asks the MME to delete a specific non-default PDN subscription context from the subscriber's stored data. Expected success is:
+- the MME accepts the request and returns **DSA** rather than `DIAMETER_ERROR_USER_UNKNOWN` or `DIAMETER_UNABLE_TO_COMPLY`;
+- the selected PDN/APN subsequently fails or associated active bearer state is deactivated if affected.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 320,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss01.example.net;1729382251;dsr-001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss01.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "DSR-Flags",
+      "avp_value": 8
+    },
+    {
+      "avp_name": "Context-Identifier",
+      "avp_value": 2
+    }
+  ]
+}
+```
+
+**Classification:**
+EXPLOITABLE

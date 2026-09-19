@@ -1,0 +1,35 @@
+{
+  "_comment": "DNS RR Field Security Analysis Targets (RFC 1035, RFC 2136, RFC 6891). Message types: Standard-Query (Opcode=0), Dynamic-Update (Opcode=5, RFC 2136), Spoofed-Response (forged DNS response, QR=1), Notify (Opcode=4, RFC 1996). Seed examples excluded: Dynamic-Update/Update-RDATA(#1), Spoofed-Response/Answer-RDATA(#2), Spoofed-Response/Answer-RR-TTL(#3), Standard-Query/EDNS-Payload-Size(#4), Standard-Query/RD-Flag(#5), Standard-Query/QCLASS(#6).",
+  "targets": [
+    {"message_type": "Standard-Query", "rr_field": "Header-ID"},
+    {"message_type": "Standard-Query", "rr_field": "QNAME"},
+    {"message_type": "Standard-Query", "rr_field": "QTYPE"},
+    {"message_type": "Standard-Query", "rr_field": "Opcode"},
+    {"message_type": "Standard-Query", "rr_field": "AD-Flag"},
+    {"message_type": "Standard-Query", "rr_field": "CD-Flag"},
+    {"message_type": "Standard-Query", "rr_field": "EDNS-Version"},
+    {"message_type": "Standard-Query", "rr_field": "EDNS-DO-Flag"},
+
+    {"message_type": "Dynamic-Update", "rr_field": "Zone-Name"},
+    {"message_type": "Dynamic-Update", "rr_field": "Zone-Class"},
+    {"message_type": "Dynamic-Update", "rr_field": "Prerequisite-RR-Name"},
+    {"message_type": "Dynamic-Update", "rr_field": "Prerequisite-RR-Type"},
+    {"message_type": "Dynamic-Update", "rr_field": "Prerequisite-RR-Class"},
+    {"message_type": "Dynamic-Update", "rr_field": "Update-RR-Name"},
+    {"message_type": "Dynamic-Update", "rr_field": "Update-RR-Type"},
+    {"message_type": "Dynamic-Update", "rr_field": "Update-RR-Class"},
+    {"message_type": "Dynamic-Update", "rr_field": "Update-RR-TTL"},
+
+    {"message_type": "Spoofed-Response", "rr_field": "Answer-RR-Name"},
+    {"message_type": "Spoofed-Response", "rr_field": "Answer-RR-Type"},
+    {"message_type": "Spoofed-Response", "rr_field": "Answer-RR-Class"},
+    {"message_type": "Spoofed-Response", "rr_field": "Authority-NS-RDATA"},
+    {"message_type": "Spoofed-Response", "rr_field": "Additional-Glue-RDATA"},
+    {"message_type": "Spoofed-Response", "rr_field": "Header-AA-Flag"},
+    {"message_type": "Spoofed-Response", "rr_field": "Header-RCODE"},
+
+    {"message_type": "Notify", "rr_field": "Notify-Zone-Name"},
+    {"message_type": "Notify", "rr_field": "Notify-SOA-Serial"},
+    {"message_type": "Notify", "rr_field": "Notify-Source-Address"}
+  ]
+}

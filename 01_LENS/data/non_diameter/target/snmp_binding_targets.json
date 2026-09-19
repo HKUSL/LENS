@@ -1,0 +1,34 @@
+{
+  "_comment": "SNMP Binding Security Analysis Targets (RFC 3411-3418 SNMPv3 Framework, RFC 1157 SNMPv1, RFC 3416 Protocol Operations). PDU Types: GetRequest-PDU, GetNextRequest-PDU, GetBulkRequest-PDU, SetRequest-PDU, SNMPv2-Trap-PDU, InformRequest-PDU. Seed examples excluded: SetRequest-Variable-Binding-Value(#1), SetRequest-Extend-Command(#2), GetBulkRequest-Max-Repetitions(#3), SetRequest-IP-Forwarding(#4), GetRequest-Variable-Binding-OID(#5), GetNextRequest-Variable-Binding-OID(#6).",
+  "targets": [
+    {"pdu_type": "SetRequest", "binding": "Variable-Binding-OID"},
+    {"pdu_type": "SetRequest", "binding": "Variable-Binding-Type"},
+    {"pdu_type": "SetRequest", "binding": "Request-ID"},
+    {"pdu_type": "SetRequest", "binding": "Error-Status"},
+    {"pdu_type": "SetRequest", "binding": "Error-Index"},
+    {"pdu_type": "SetRequest", "binding": "Community-String"},
+
+    {"pdu_type": "GetRequest", "binding": "Community-String"},
+    {"pdu_type": "GetRequest", "binding": "Request-ID"},
+    {"pdu_type": "GetRequest", "binding": "Version"},
+
+    {"pdu_type": "GetNextRequest", "binding": "Community-String"},
+    {"pdu_type": "GetNextRequest", "binding": "Request-ID"},
+
+    {"pdu_type": "GetBulkRequest", "binding": "Non-Repeaters"},
+    {"pdu_type": "GetBulkRequest", "binding": "Community-String"},
+    {"pdu_type": "GetBulkRequest", "binding": "Variable-Binding-OID"},
+    {"pdu_type": "GetBulkRequest", "binding": "Request-ID"},
+
+    {"pdu_type": "SNMPv2-Trap", "binding": "Variable-Binding-Value"},
+    {"pdu_type": "SNMPv2-Trap", "binding": "Variable-Binding-OID"},
+    {"pdu_type": "SNMPv2-Trap", "binding": "Community-String"},
+    {"pdu_type": "SNMPv2-Trap", "binding": "SysUpTime"},
+    {"pdu_type": "SNMPv2-Trap", "binding": "SnmpTrapOID"},
+
+    {"pdu_type": "InformRequest", "binding": "Variable-Binding-Value"},
+    {"pdu_type": "InformRequest", "binding": "Variable-Binding-OID"},
+    {"pdu_type": "InformRequest", "binding": "Community-String"},
+    {"pdu_type": "InformRequest", "binding": "Request-ID"}
+  ]
+}

