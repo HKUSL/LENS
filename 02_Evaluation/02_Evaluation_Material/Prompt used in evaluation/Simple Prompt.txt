@@ -1,0 +1,5 @@
+You are an expert in the Diameter protocol. Analyze whether a specific Diameter field can be exploit and generate corresponding exploitability analysis report. If it is exploitable, please generate PoC. 
+
+Target field:
+=== Target Diameter Field Information ===
+{}

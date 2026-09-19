@@ -1,0 +1,34 @@
+I asked an LLM to analyze the exploitability of some 3GPP Diameter field paths.
+The LLM followed the exploitability-analysis prompt, p_exp, to analyze the target field paths.
+However, the LLM-generated exploitability analysis did not pass expert review.
+I believe the failures come from the LLM not knowing enough protocol context about each target field.
+
+For each example below I show the target field, the exploitability-analysis prompt p_exp, the LLM-generated writeup, and the ground-truth writeup.
+
+=== Exploitability-Analysis Prompt ===
+
+
+=== Example 1: Diameter field (Exploitable) ===
+
+
+=== Example 1: Failed LLM-Generated Report===
+
+
+=== Example 1: Ground-truth Expert-Written Report ===
+
+
+=== Example 2: Diameter field (Non-Exploitable) ===
+
+
+=== Example 2: Failed LLM-Generated Report===
+
+
+=== Example 2: Ground-truth Expert-Written Report ===
+
+
+Your task is to infer a general protocol evidence-collection prompt from these feedbacks. 
+Given any Diameter field path as input, this prompt should instruct an LLM to search all the relevant 3GPP specifications and collect needed protocol context related to this field path for exploitability analysis and PoC construction, 
+so that the generated context is sufficient to support reports reproducing the ground-truth reports. 
+The prompt must be reusable on unseen Diameter field paths. 
+
+Output only the inferred prompt.

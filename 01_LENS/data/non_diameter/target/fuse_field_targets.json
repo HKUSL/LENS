@@ -1,0 +1,42 @@
+{
+  "_comment": "FUSE protocol operation-field level security analysis targets. Each target specifies a FUSE opcode (or header/mount context) and a specific field that represents a potential attack vector at the kernel-daemon boundary via /dev/fuse. Grouped by field category: header fields, INIT negotiation, opcode-specific fields, and mount/connection parameters.",
+  "targets": [
+    {"message_type": "FUSE_IN_HEADER", "field": "len - total request length in bytes including header; determines payload parsing boundary and buffer allocation in daemon"},
+    {"message_type": "FUSE_IN_HEADER", "field": "opcode - operation type code (uint32); determines payload structure layout and handler dispatch in daemon"},
+    {"message_type": "FUSE_IN_HEADER", "field": "nodeid - inode identifier for the target filesystem object (uint64); controls which object the operation acts on; nodeid 1 is the root"},
+    {"message_type": "FUSE_IN_HEADER", "field": "uid - user ID of the process that triggered the VFS request; used by daemon for access control decisions"},
+    {"message_type": "FUSE_IN_HEADER", "field": "gid - group ID of the process that triggered the VFS request; used by daemon for access control decisions"},
+    {"message_type": "FUSE_IN_HEADER", "field": "pid - process ID of the requesting process; used for POSIX lock ownership and signal delivery on interrupt"},
+    {"message_type": "FUSE_OUT_HEADER", "field": "error - operation result as negative errno value (0 = success); controls kernel error propagation and ENOSYS fallback behavior"},
+
+    {"message_type": "FUSE_INIT", "field": "major - protocol major version number; mismatch causes mount failure; controls struct layout interpretation across versions"},
+    {"message_type": "FUSE_INIT", "field": "minor - protocol minor version number; controls feature availability and struct field presence within the same major version"},
+    {"message_type": "FUSE_INIT", "field": "flags - capability bitmask negotiated between kernel and daemon; controls which features are active (FUSE_HANDLE_KILLPRIV, FUSE_POSIX_ACL, FUSE_WRITEBACK_CACHE, FUSE_NO_OPEN_SUPPORT, etc.)"},
+    {"message_type": "FUSE_INIT", "field": "max_readahead - maximum readahead size in bytes negotiated at init; controls prefetch window and memory allocation"},
+    {"message_type": "FUSE_INIT", "field": "max_write - maximum size of a single write payload; controls per-request buffer allocation and potential for oversized writes"},
+    {"message_type": "FUSE_INIT", "field": "max_pages - maximum number of pages per request (since protocol 7.28); controls scatter-gather I/O and memory pinning limits"},
+    {"message_type": "FUSE_INIT", "field": "time_gran - timestamp granularity in nanoseconds; incorrect values can cause time comparison failures and TOCTOU conditions"},
+
+    {"message_type": "ACCESS", "field": "mask - access mode bitmask (R_OK|W_OK|X_OK|F_OK); ENOSYS response from daemon treated as permanent success for all future access checks"},
+    {"message_type": "CREATE", "field": "mode - file creation mode bits including S_ISUID/S_ISGID/S_ISVTX; controls initial permission and privilege semantics of new files"},
+    {"message_type": "CREATE", "field": "flags - open flags (O_RDWR, O_EXCL, O_TRUNC, etc.); daemon must honor kernel-sanitized flags; mismatch can cause data loss or race conditions"},
+    {"message_type": "SETATTR", "field": "valid - bitmask indicating which attributes to set (FATTR_MODE, FATTR_UID, FATTR_GID, FATTR_SIZE, etc.); controls chown/chmod/truncate semantics"},
+    {"message_type": "GETXATTR", "field": "size - maximum value buffer size; size=0 means return only the value length; mismatch between probed and actual size enables TOCTOU"},
+    {"message_type": "GETXATTR", "field": "name - extended attribute name string (e.g., security.selinux, user.mime_type); controls which xattr is retrieved; affects MAC label integrity"},
+    {"message_type": "SETXATTR", "field": "flags - XATTR_CREATE or XATTR_REPLACE semantics; incorrect handling can overwrite existing security labels or bypass mandatory access controls"},
+    {"message_type": "IOCTL", "field": "cmd - ioctl command number truncated from unsigned long to uint32 in FUSE protocol; causes command aliasing on 64-bit systems per libfuse documentation"},
+    {"message_type": "IOCTL", "field": "flags - ioctl processing flags including FUSE_IOCTL_UNRESTRICTED and FUSE_IOCTL_DIR; UNRESTRICTED bypasses standard ioctl validation"},
+    {"message_type": "IOCTL", "field": "in_bufsz - input buffer size for data passed from application to daemon; oversized or zero values affect daemon buffer allocation"},
+    {"message_type": "IOCTL", "field": "out_bufsz - output buffer size for data returned from daemon to application; mismatch with actual output causes truncation or overread"},
+    {"message_type": "FLUSH", "field": "lock_owner - lock owner identifier sent on close(2); ENOSYS from flush is treated as permanent success; flush/close lifetime semantics are distinct per libfuse docs"},
+    {"message_type": "RENAME", "field": "newdir - destination directory nodeid for rename(2); cross-directory rename race with lookup count creates nodeid lifetime mismatch"},
+    {"message_type": "INTERRUPT", "field": "unique - the unique ID of the request to interrupt; race between original request completion and interrupt delivery; kernel docs describe explicit race semantics"},
+    {"message_type": "COPY_FILE_RANGE", "field": "len - number of bytes to copy; bounded by max_write but daemon must validate; zero-length and oversized values are edge cases"},
+    {"message_type": "FALLOCATE", "field": "mode - fallocate mode flags (FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, etc.); punch-hole on security-sensitive data must zero, not just deallocate"},
+
+    {"message_type": "MOUNT", "field": "default_permissions - when set, kernel enforces standard Unix permission checks (mode bits, uid/gid) instead of delegating to daemon; absence shifts all access control to daemon"},
+    {"message_type": "MOUNT", "field": "allow_other - when set, allows users other than the mount owner to access the filesystem; combined with no default_permissions, enables confused deputy attacks"},
+    {"message_type": "MOUNT", "field": "max_idle_threads - maximum idle worker threads in libfuse; resource exhaustion vector if daemon is tricked into spawning unbounded threads"},
+    {"message_type": "MOUNT", "field": "rootmode - the file mode of the root inode set at mount time; determines initial access control for the mount point itself"}
+  ]
+}

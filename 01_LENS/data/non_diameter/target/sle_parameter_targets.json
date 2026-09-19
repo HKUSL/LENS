@@ -1,0 +1,64 @@
+{
+  "_comment": "CCSDS SLE Protocol Security Analysis Targets. Based on CCSDS 913.1-B-2 (ISP1 transport), 911.1-B-5 (RAF), 912.1-B-5 (FCLTU). Seed examples excluded: ATTACK: SLE-BIND-INVOCATION/invoker-credentials.the-protected(#1), CLTU-TRANSFER-DATA-INVOCATION/cltu-data(#2), SLE-PEER-ABORT-INVOCATION/peer-abort-diagnostic(#3); SAFE: SLE-BIND-INVOCATION/service-instance-identifier(#4), RAF-START-INVOCATION/requested-frame-quality(#5), SLE-BIND-INVOCATION/version-number(#6), CLTU-TRANSFER-DATA-INVOCATION/cltu-identification(#7), RAF-SCHEDULE-STATUS-REPORT-INVOCATION/reporting-cycle(#8). Ref: CCSDS Blue Books (913.1-B-2, 911.1-B-5, 912.1-B-5).",
+  "targets": [
+    {"operation": "SLE-BIND-INVOCATION", "parameter": "initiator-identifier"},
+    {"operation": "SLE-BIND-INVOCATION", "parameter": "responder-port-identifier"},
+    {"operation": "SLE-BIND-INVOCATION", "parameter": "service-type"},
+    {"operation": "SLE-BIND-INVOCATION", "parameter": "invoker-credentials.isp1-credentials.time"},
+    {"operation": "SLE-BIND-INVOCATION", "parameter": "invoker-credentials.isp1-credentials.random-number"},
+
+    {"operation": "SLE-UNBIND-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "SLE-UNBIND-INVOCATION", "parameter": "unbind-reason"},
+
+    {"operation": "CLTU-START-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "CLTU-START-INVOCATION", "parameter": "first-cltu-identification"},
+
+    {"operation": "CLTU-STOP-INVOCATION", "parameter": "invoker-credentials"},
+
+    {"operation": "CLTU-TRANSFER-DATA-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "CLTU-TRANSFER-DATA-INVOCATION", "parameter": "earliest-radiation-time"},
+    {"operation": "CLTU-TRANSFER-DATA-INVOCATION", "parameter": "latest-radiation-time"},
+    {"operation": "CLTU-TRANSFER-DATA-INVOCATION", "parameter": "delay-time"},
+    {"operation": "CLTU-TRANSFER-DATA-INVOCATION", "parameter": "radiation-notification"},
+
+    {"operation": "CLTU-SCHEDULE-STATUS-REPORT-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "CLTU-SCHEDULE-STATUS-REPORT-INVOCATION", "parameter": "reporting-cycle"},
+
+    {"operation": "CLTU-GET-PARAMETER-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "CLTU-GET-PARAMETER-INVOCATION", "parameter": "requested-parameter"},
+
+    {"operation": "CLTU-THROW-EVENT-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "CLTU-THROW-EVENT-INVOCATION", "parameter": "event-invocation-identification"},
+    {"operation": "CLTU-THROW-EVENT-INVOCATION", "parameter": "event-identifier"},
+    {"operation": "CLTU-THROW-EVENT-INVOCATION", "parameter": "event-qualifier"},
+
+    {"operation": "RAF-START-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "RAF-START-INVOCATION", "parameter": "start-time"},
+    {"operation": "RAF-START-INVOCATION", "parameter": "stop-time"},
+
+    {"operation": "RAF-STOP-INVOCATION", "parameter": "invoker-credentials"},
+
+    {"operation": "RAF-SCHEDULE-STATUS-REPORT-INVOCATION", "parameter": "invoker-credentials"},
+
+    {"operation": "RAF-GET-PARAMETER-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "RAF-GET-PARAMETER-INVOCATION", "parameter": "requested-parameter"},
+
+    {"operation": "RCF-BIND-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "RCF-BIND-INVOCATION", "parameter": "service-instance-identifier"},
+    {"operation": "RCF-START-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "RCF-START-INVOCATION", "parameter": "start-time"},
+    {"operation": "RCF-START-INVOCATION", "parameter": "stop-time"},
+    {"operation": "RCF-START-INVOCATION", "parameter": "requested-global-vcid"},
+    {"operation": "RCF-GET-PARAMETER-INVOCATION", "parameter": "requested-parameter"},
+
+    {"operation": "FSP-BIND-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "FSP-BIND-INVOCATION", "parameter": "service-instance-identifier"},
+    {"operation": "FSP-TRANSFER-DATA-INVOCATION", "parameter": "invoker-credentials"},
+    {"operation": "FSP-TRANSFER-DATA-INVOCATION", "parameter": "fsp-data"},
+    {"operation": "FSP-TRANSFER-DATA-INVOCATION", "parameter": "fsp-identification"},
+    {"operation": "FSP-TRANSFER-DATA-INVOCATION", "parameter": "earliest-radiation-time"},
+    {"operation": "FSP-TRANSFER-DATA-INVOCATION", "parameter": "latest-radiation-time"},
+    {"operation": "FSP-INVOKE-DIRECTIVE-INVOCATION", "parameter": "directive-identifier"},
+    {"operation": "FSP-INVOKE-DIRECTIVE-INVOCATION", "parameter": "directive-qualifier"}
+  ]
+}

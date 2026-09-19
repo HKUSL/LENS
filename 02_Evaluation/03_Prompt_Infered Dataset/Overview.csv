@@ -1,0 +1,17 @@
+id,interface,label,filed
+1,s6a,EXPLOITABLE,Purge-UE-Request:Origin-Host
+2,s6a,EXPLOITABLE,Update-Location-Request:ULR-Flags.Single-Registration-Indication
+3,s6a,EXPLOITABLE,Insert-Subscriber-Data-Request:Access-Restriction-Data.
+4,s6a,EXPLOITABLE,Insert-Subscriber-Data-Request:Subscription-Data.APN-Configuration-Profile.APN-Configuration.Service-Selection
+5,s6a,EXPLOITABLE,Insert-Subscriber-Data-Request:Subscription-Data.Operator-Determined-Barring
+6,s6a,EXPLOITABLE,Cancel-Location-Request:Cancellation-Type.MME_UPDATE_PROCEDURE
+7,s6a,EXPLOITABLE,Delete-Subscriber-Data-Request:Context-Identifier
+8,s6a,EXPLOITABLE,Reset-Request:User-Id
+11,s6a,NON-EXPLOITABLE,Authentication-Information-Request:Requested-EUTRAN-Authentication-Info.Immediate-Response-Preferred
+12,s6a,NON-EXPLOITABLE,Insert-Subscriber-Data-Request:Subscription-Data.APN-Configuration.Visited-Network-Identifier
+13,s6a,NON-EXPLOITABLE,Insert-Subscriber-Data-Request:Subscription-Data.RAT-Frequency-Selection-Priority-ID
+14,s6a,NON-EXPLOITABLE,Update-Location-Request:Homogeneous-Support-of-IMS-Voice-Over-PS-Sessions
+15,s6a,NON-EXPLOITABLE,Insert-Subscriber-Data-Request:Subscription-Data.APN-Configuration-Profile.APN-Configuration.Restoration-Priority
+16,s6a,NON-EXPLOITABLE,Cancel-Location-Request:CLR-Flags.Reattach-Required
+17,s6a,NON-EXPLOITABLE,Authentication-Information-Request:Requested-EUTRAN-Authentication-Info.Re-Synchronization-Info
+18,cx,NON-EXPLOITABLE,Push-Profile-Request:Origin-Host

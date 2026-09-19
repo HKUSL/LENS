@@ -1,0 +1,46 @@
+{
+  "_comment": "BGP Path Attribute Security Analysis Targets. Scope: RFC 4271 UPDATE message path attributes + RFC 1997/8092 communities + RFC 4360 extended communities. Message types: UPDATE. Seed examples excluded: UPDATE-NLRI(#1), UPDATE-AS_PATH(#2), UPDATE-ORIGIN(#3), UPDATE-COMMUNITIES(#4), UPDATE-NEXT_HOP(#5), UPDATE-AGGREGATOR(#6).",
+  "targets": [
+    {"message_type": "UPDATE", "attribute": "AS_PATH.AS_SEQUENCE.prepending"},
+    {"message_type": "UPDATE", "attribute": "AS_PATH.AS_SET"},
+    {"message_type": "UPDATE", "attribute": "AS_PATH.AS_CONFED_SEQUENCE"},
+    {"message_type": "UPDATE", "attribute": "MULTI_EXIT_DISC"},
+    {"message_type": "UPDATE", "attribute": "LOCAL_PREF"},
+    {"message_type": "UPDATE", "attribute": "ATOMIC_AGGREGATE"},
+    {"message_type": "UPDATE", "attribute": "ORIGINATOR_ID"},
+    {"message_type": "UPDATE", "attribute": "CLUSTER_LIST"},
+
+    {"message_type": "UPDATE", "attribute": "COMMUNITIES.NO_EXPORT"},
+    {"message_type": "UPDATE", "attribute": "COMMUNITIES.NO_ADVERTISE"},
+    {"message_type": "UPDATE", "attribute": "COMMUNITIES.NO_EXPORT_SUBCONFED"},
+    {"message_type": "UPDATE", "attribute": "COMMUNITIES.blackhole"},
+    {"message_type": "UPDATE", "attribute": "COMMUNITIES.route_leak_marking"},
+
+    {"message_type": "UPDATE", "attribute": "EXTENDED_COMMUNITIES.route_target"},
+    {"message_type": "UPDATE", "attribute": "EXTENDED_COMMUNITIES.route_origin"},
+
+    {"message_type": "UPDATE", "attribute": "LARGE_COMMUNITIES.action_community"},
+
+    {"message_type": "UPDATE", "attribute": "NLRI.subprefix"},
+    {"message_type": "UPDATE", "attribute": "NLRI.default_route"},
+    {"message_type": "UPDATE", "attribute": "NLRI.bogon_prefix"},
+
+    {"message_type": "UPDATE", "attribute": "WITHDRAWN_ROUTES.targeted_withdrawal"},
+    {"message_type": "UPDATE", "attribute": "WITHDRAWN_ROUTES.mass_withdrawal"},
+
+    {"message_type": "UPDATE", "attribute": "MP_REACH_NLRI.ipv6_prefix_hijack"},
+    {"message_type": "UPDATE", "attribute": "MP_REACH_NLRI.next_hop_ipv6"},
+    {"message_type": "UPDATE", "attribute": "MP_UNREACH_NLRI.ipv6_withdrawal"},
+
+    {"message_type": "OPEN", "attribute": "capabilities.four_octet_as"},
+    {"message_type": "OPEN", "attribute": "capabilities.route_refresh"},
+    {"message_type": "OPEN", "attribute": "capabilities.add_path"},
+    {"message_type": "OPEN", "attribute": "hold_time"},
+    {"message_type": "OPEN", "attribute": "bgp_identifier"},
+
+    {"message_type": "NOTIFICATION", "attribute": "error_code.cease"},
+    {"message_type": "NOTIFICATION", "attribute": "error_code.update_message_error"},
+
+    {"message_type": "ROUTE-REFRESH", "attribute": "afi_safi"}
+  ]
+}

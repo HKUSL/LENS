@@ -1,0 +1,56 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On `S6a`, the victim is the `MME` and the expected sender is the `HSS`. Assume the `MME` exposes Diameter service and, due to missing peer authentication, accepts a forged `Insert-Subscriber-Data-Request` from an Internet attacker posing as the `HSS` for a known subscriber IMSI.
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the `MME`, send crafted `IDR` requests, and receive the corresponding `IDA` answers. The attacker cannot observe or modify legitimate `HSS`<->`MME` traffic and has no extra NAS/GTP/radio capabilities; any effect must come from the `MME`'s processing of the forged `IDR` itself.
+
+### **Exploitability Analysis:**
+- `All-APN-Configurations-Included-Indicator` is not mere metadata here; inside `Subscription-Data.APN-Configuration-Profile` it is an authoritative `HSS` provisioning input that tells the `MME` whether the included `APN-Configuration` set is a complete replacement or only a partial update.
+- That makes the field a real control point over update semantics. With the same forged `IDR` payload, changing this indicator can cause omitted APNs to be treated either as deleted/not subscribed or as preserved/unchanged.
+- A malicious `IDR` that includes only a reduced APN subset and sets the indicator to the "all included" value can therefore poison the subscriber's APN profile stored in the `MME`: omitted APNs, including a default APN, may disappear from the local subscription view.
+- The downstream impact is concrete and within the threat model. On later attach, TAU-related profile use, or a UE `PDN Connectivity Request`, the `MME` may reject a requested APN as unsubscribed, fail default PDN establishment, or select an unintended remaining APN profile. Those consequences arise specifically from this field's replacement-vs-merge semantics, not just from the generic fact that `IDR` is powerful.
+- The field does depend on semantically coherent sibling `APN-Configuration` content; by itself it does not create harm. But when combined with a valid reduced APN list, it directly controls whether omitted APNs survive. That is sufficient field-specific exploitability.
+- The corrupted state is likely retained in subscriber context until overwritten by a later legitimate `IDR`, fresh profile download, or context rebuild, so the effect can persist beyond the transaction.
+
+### **Attack Procedure:**
+- Establish a Diameter connection to the target `MME` while impersonating the expected `HSS`, then send an `Insert-Subscriber-Data-Request` for the victim IMSI with `Subscription-Data -> APN-Configuration-Profile`.
+- Include a syntactically valid but reduced APN set, for example only one `APN-Configuration`, and set `All-APN-Configurations-Included-Indicator` to the value meaning "all APN configurations are included".
+- Provide the required grouped ancestors and semantically necessary siblings: `Context-Identifier` for the profile and at least one valid `APN-Configuration` containing `Context-Identifier`, `PDN-Type`, and `Service-Selection`.
+- The expected success condition is that the `MME` accepts the `IDR` and later treats omitted APNs as no longer subscribed, observable as APN-specific PDN failures or loss/change of the default APN behavior for that subscriber.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": "IDR",
+    "application_id": "S6a/S6d",
+    "request": true
+  },
+  "avps": [
+    { "Session-Id": "attacker-hss.example.net;123456789" },
+    {
+      "Vendor-Specific-Application-Id": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": "S6a/S6d"
+      }
+    },
+    { "Auth-Session-State": 1 },
+    { "Origin-Host": "fake-hss.attacker.example" },
+    { "Origin-Realm": "attacker.example" },
+    { "Destination-Host": "mme01.victim.example" },
+    { "Destination-Realm": "victim.example" },
+    { "User-Name": "001010123456789" },
+    {
+      "Subscription-Data": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

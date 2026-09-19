@@ -1,0 +1,87 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the victim is the **MME** and the spoofed expected sender is the **HSS**. The attacker can directly open a Diameter connection to the MME and send a forged **Insert-Subscriber-Data-Request (IDR)** that the MME accepts as if it came from the HSS, including subscriber data for a known IMSI.
+
+- **Attacker Capability:**
+  - The attacker can craft and send arbitrary Diameter **Requests** on its own connection and receive the corresponding **Answers**, but cannot observe or alter legitimate HSS<->MME traffic and has no extra radio, NAS, GTP, or UE-side control beyond knowing the target subscriber identity. The question is therefore whether changing `Subscription-Data.APN-Configuration-Profile.APN-Configuration.PDN-Type` itself causes a concrete harmful effect.
+
+### **Exploitability Analysis:**
+`Subscription-Data.APN-Configuration-Profile.APN-Configuration.PDN-Type` is **field-specifically exploitable** in this threat model.
+
+This AVP is a 3GPP vendor-specific **Enumerated** leaf inside the per-APN subscription profile carried from **HSS to MME** in an **IDR Request**. It is not descriptive peer metadata and not merely a report of sender state. It is authoritative provisioning input for a specific `APN-Configuration` instance, typically keyed by `Context-Identifier`, and is stored by the MME as part of the subscriber's APN profile.
+
+The field-specific causal chain is concrete:
+
+1. The attacker forges an **IDR** to the MME for a target IMSI and includes `Subscription-Data > APN-Configuration-Profile > APN-Configuration` with a chosen malicious `PDN-Type` such as `IPv6` or `IPv4` instead of the legitimate `IPv4v6`.
+2. The MME accepts the HSS-originated subscriber update and overwrites or updates the cached APN configuration for that subscriber.
+3. The altered `PDN-Type` is later reused by the MME during attach/default PDN setup or a later UE PDN Connectivity Request when validating the requested PDN type and when forming downstream session-establishment behavior.
+4. Because `PDN-Type` directly constrains the allowed PDN type for that APN, the next use of that APN can fail, be downgraded, or become inconsistent with UE/network expectations.
+5. Observable consequences include PDN Connectivity Reject, default PDN establishment failure during attach, attach with reduced service, or loss of dual-stack connectivity.
+
+The key point is that these outcomes arise **because this field changes**, not merely because an IDR was accepted. A forged IDR is broadly dangerous, but `PDN-Type` is itself a control-bearing subscriber parameter that directly influences later bearer/session establishment semantics. Changing only this field can turn a valid APN entry into one that permits only IPv4, only IPv6, or another incompatible PDN type, producing subscriber-visible denial or degradation on later normal procedures.
+
+The impact may not be immediate for already active bearers, but delayed enforcement on the next attach/PDN establishment still counts as field-specific exploitability because the MME stores and later consumes the poisoned value. Later legitimate HSS refresh, detach/context loss, or re-download of subscription data can overwrite it, but that does not negate the attack while the cached state remains active.
+
+### **Attack Procedure:**
+Send a forged **Insert-Subscriber-Data-Request** from the attacker-controlled Diameter connection to the target MME, using the victim IMSI in `User-Name` and including `Subscription-Data` with an `APN-Configuration-Profile` containing at least one coherent `APN-Configuration`. In that APN entry, set `Context-Identifier`, `Service-Selection`, and the target `PDN-Type` to a malicious restrictive value such as `IPv6` for an APN normally used as `IPv4v6`.
+
+The expected success condition is that the MME accepts the IDR and later, when the UE attaches or requests connectivity for that APN, PDN establishment is rejected or service is downgraded in a way consistent with the forged `PDN-Type`.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true,
+    "session_id": "attacker-hss.example.net;1712345678;1"
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker-hss.example.net;1712345678;1" },
+    { "name": "Auth-Session-State", "value": "NO_STATE_MAINTAINED" },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "Origin-Host", "value": "fake-hss.attacker.net" },
+    { "name": "Origin-Realm", "value": "attacker.net" },
+    { "name": "Destination-Host", "value": "mme01.epc.example.net" },
+    { "name": "Destination-Realm", "value": "epc.example.net" },
+    { "name": "User-Name", "value": "001010123456789" },
+    { "name": "IDR-Flags", "value": 1 },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "APN-Configuration-Profile": {
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "PDN-Type": "IPv4v6",
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

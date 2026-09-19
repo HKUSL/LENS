@@ -1,0 +1,96 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **HSS** on **S6a**, and the attacker impersonates a serving **MME** and sends a forged **Update-Location-Request (ULR)** for a known subscriber IMSI. The HSS accepts the request as if it came from a legitimate MME and processes the included `ULR-Flags` during Update Location handling.
+
+- **Attacker Capability:**
+  - The attacker can open its own unauthenticated Diameter connection to the HSS, send arbitrary `ULR` requests, and receive the corresponding `ULA` answers. The attacker does not observe or alter real MME-HSS traffic and has no extra LTE/NAS/GTP capabilities beyond being able to forge coherent S6a request AVPs for the target IMSI.
+
+### **Exploitability Analysis:**
+`ULR-Flags` is **field-specifically security-relevant** here. It is a mandatory top-level 3GPP AVP (`Code 1405`, `Vendor-Id 10415`, `Unsigned32` bitmask) that the HSS treats as authoritative procedural control input, not as passive metadata.
+
+The key point is the **incremental effect of changing this field** after the attacker already has the ability to submit a forged ULR. Several `ULR-Flags` bits cause additional HSS actions that would not be equivalent across all flag values:
+
+- **Bit 0 - Single-Registration-Indication**: when set, the HSS shall send **Cancel-Location** to the SGSN and delete stored SGSN registration details.
+- **Bit 5 - Initial-Attach-Indicator**: when set, the HSS shall trigger **Cancel-Location** to an already registered MME/SGSN under the specified conditions.
+- **Bit 2 - Skip Subscriber Data** and **Bit 3 - GPRS-Subscription-Data-Indicator** change what subscriber data the HSS returns and, for bit 3, influence later subscriber-data-update behavior.
+
+Among these, the strongest field-driven abuse under the stated threat model is the **registration-cancellation path** via bits **0 and/or 5**. The causal chain is:
+
+1. The attacker sends a forged S6a ULR for a target IMSI.
+2. The HSS accepts the ULR and processes `ULR-Flags` as trusted control input.
+3. Because the selected flag bit is set, the HSS performs additional control-plane actions mandated by the spec, especially **sending Cancel-Location** to previously registered serving nodes and, for bit 0, deleting stored SGSN registration data.
+4. This creates a concrete subscriber-visible disruption: concurrent/previous registration state is actively torn down, not merely replaced by the generic forged ULR procedure.
+5. The disruption persists until later legitimate mobility signaling re-establishes correct state.
+
+This is more than "forged ULR is bad." A forged ULR already changes serving-node registration and can trigger normal update-location side effects, but `ULR-Flags` is the **specific control point** that selects extra cancellation behavior and alters HSS handling of subscriber-data delivery. That makes the field itself incrementally exploitable.
+
+Not every bit is equally strong. Bits such as **Node-Type-Indicator**, **S6a/S6d-Indicator**, or UE capability/status style claims are weaker because they are descriptive/capability assertions and may not yield attacker-realizable downstream effects. But the AVP as a whole is still exploitable because some defined bits directly control HSS behavior and state handling.
+
+### **Attack Procedure:**
+1. Establish a Diameter connection to the target HSS while impersonating an MME.
+2. Send a forged **Update-Location-Request** for the victim subscriber IMSI with all mandatory ULR AVPs present.
+3. Set `ULR-Flags` to a malicious bitmask(Skip Subscriber Data) that preserves S6a coherence while enabling cancellation behavior, e.g.:
+4. Use a plausible `Origin-Host` identifying the attacker-controlled fake MME so the HSS binds the subscriber to that serving node context.
+5. Observe success via:
+   - receipt of a valid **ULA** on the attacker connection, and
+   - expected subscriber disruption caused by HSS-triggered cancellation of prior registration state.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 316,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fake-mme01.example.net;1710000001;12345"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "mme01.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "attacker.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "operator.example"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "RAT-Type",
+      "value": "EUTRAN"
+    },
+    {
+      "name": "ULR-Flags",
+      "value":  0 
+    },
+    {
+      "name": "Visited-PLMN-Id",
+      "value": "00101"
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

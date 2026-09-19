@@ -1,0 +1,32 @@
+{
+  "_comment": "BGP FlowSpec (RFC 8955) Security Analysis Targets. Scope: FlowSpec NLRI match types and extended community actions. Message types: FLOWSPEC-UPDATE. Seed examples excluded: redirect-to-ip(#1), traffic-action-discard(#2), redirect-to-vrf(#3), traffic-rate-limit(#4), source-prefix-collateral(#5), dscp-marking(#6).",
+  "targets": [
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "redirect-to-ip.ipv6"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "redirect-to-vrf.cross-tenant"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "traffic-rate.zero-rate-broad-prefix"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "traffic-rate.micro-rate-degradation"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "traffic-marking.dscp-rewrite-ef-to-be"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "traffic-action.terminal-discard-icmp"},
+
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.destination-prefix-wildcard"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.source-prefix-overbroad"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.protocol-any-match"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.port-range-wide"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.icmp-type-code-filter"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.tcp-flags-syn-only"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.packet-length-filter"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.fragment-filter"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "nlri.dscp-match"},
+
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "feasibility-check-bypass.ebgp-no-validation"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "feasibility-check-bypass.confederation"},
+
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "ipv6-flowspec.redirect-to-ip-v6"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "ipv6-flowspec.discard-v6-prefix"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "ipv6-flowspec.flow-label-match"},
+
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "interaction.flowspec-plus-unicast-hijack"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "interaction.flowspec-rule-ordering-conflict"},
+    {"message_type": "FLOWSPEC-UPDATE", "attribute": "interaction.multiple-action-communities"}
+  ]
+}

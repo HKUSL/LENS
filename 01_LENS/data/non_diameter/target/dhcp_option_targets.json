@@ -1,0 +1,38 @@
+{
+  "_comment": "DHCP Option/Field Security Analysis Targets (RFC 2131, RFC 2132, RFC 3046, RFC 3442). Message types: DHCPDISCOVER (client broadcast, op=1), DHCPOFFER (server response, op=2), DHCPREQUEST (client confirmation, op=1), DHCPACK (server acknowledgment, op=2), DHCPRELEASE (client release, op=1), DHCPDECLINE (client decline, op=1), DHCPINFORM (client info-only, op=1). Seed examples excluded: DHCPOFFER/Option-6-Domain-Name-Server(#1), DHCPOFFER/Option-252-WPAD-URL(#2), DHCPOFFER/Option-15-Domain-Name(#3), DHCPOFFER/Option-121-Classless-Static-Routes(#4), DHCPDISCOVER/Option-55-Parameter-Request-List(#5), DHCPREQUEST/Option-12-Host-Name(#6).",
+  "targets": [
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "chaddr"},
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "Broadcast-Flag"},
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "Option-53-Message-Type"},
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "Option-57-Maximum-DHCP-Message-Size"},
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "Option-60-Vendor-Class-Identifier"},
+    {"message_type": "DHCPDISCOVER", "dhcp_field": "Option-61-Client-Identifier"},
+
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-1-Subnet-Mask"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-3-Router"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-51-IP-Address-Lease-Time"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-54-Server-Identifier"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-119-Domain-Search-List"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "yiaddr"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "siaddr"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "sname"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "file-Boot-File-Name"},
+    {"message_type": "DHCPOFFER", "dhcp_field": "Option-43-Vendor-Specific-Information"},
+
+    {"message_type": "DHCPREQUEST", "dhcp_field": "Option-50-Requested-IP-Address"},
+    {"message_type": "DHCPREQUEST", "dhcp_field": "Option-54-Server-Identifier"},
+    {"message_type": "DHCPREQUEST", "dhcp_field": "ciaddr"},
+
+    {"message_type": "DHCPACK", "dhcp_field": "Option-6-Domain-Name-Server"},
+    {"message_type": "DHCPACK", "dhcp_field": "Option-43-Vendor-Specific-Information"},
+    {"message_type": "DHCPACK", "dhcp_field": "Option-82-Relay-Agent-Information"},
+
+    {"message_type": "DHCPRELEASE", "dhcp_field": "ciaddr"},
+    {"message_type": "DHCPRELEASE", "dhcp_field": "Option-54-Server-Identifier"},
+
+    {"message_type": "DHCPDECLINE", "dhcp_field": "Option-50-Requested-IP-Address"},
+
+    {"message_type": "DHCPINFORM", "dhcp_field": "Option-43-Vendor-Specific-Information"},
+    {"message_type": "DHCPINFORM", "dhcp_field": "ciaddr"}
+  ]
+}

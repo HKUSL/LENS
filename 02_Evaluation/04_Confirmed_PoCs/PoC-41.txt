@@ -1,0 +1,91 @@
+### **Threat Model:**
+- **Attack Assumption:**
+  - The victim is the **MME** on the **S6a** interface. Due to Diameter exposure and lack of peer authentication, an Internet attacker can impersonate the **HSS** and send a forged **Insert-Subscriber-Data-Request (IDR)** directly to the MME for a known subscriber.
+
+- **Attacker Capability:**
+  - The attacker can establish its own Diameter connection to the MME, send crafted **IDR Requests**, and receive the corresponding Answers. The attacker does not observe or tamper with legitimate HSS<->MME traffic and has no extra NAS/GTP/radio capabilities; the relevant power is limited to supplying forged subscriber data, including `Subscription-Data.Subscribed-Periodic-RAU-TAU-Timer`.
+
+### **Exploitability Analysis:**
+`Subscription-Data.Subscribed-Periodic-RAU-TAU-Timer` is **field-specifically exploitable** under this threat model.
+
+This AVP is not descriptive metadata about the sender. In S6a IDR it is an **authoritative HSS provisioning parameter** delivered inside `Subscription-Data`, and the MME is expected to **store/update** it in the subscriber context. Its semantics are control-relevant: it sets the subscriber's provisioned periodic **RAU/TAU mobility update timer**, which the MME later uses in NAS mobility-management handling.
+
+The field-specific causal chain is:
+
+1. The attacker sends a forged **IDR** to the MME with `Subscription-Data.Subscribed-Periodic-RAU-TAU-Timer` set to an attacker-chosen value.
+2. The MME accepts the request as HSS-originated subscriber data and updates the stored mobility-management profile for the targeted UE.
+3. On later attach/TAU/related NAS processing, the MME reuses that stored timer value when determining periodic mobility update behavior for the UE.
+4. A malicious but valid timer can therefore make periodic updates occur **too frequently** or **too infrequently**, yielding concrete subscriber/network impact:
+   - excess TAU/RAU signaling load on UE and MME,
+   - battery impact on the UE,
+   - altered reachability/location-refresh behavior,
+   - mobility-state degradation or stale-registration effects depending on implementation.
+
+This is narrower than APN or bearer-policy corruption, but it is still a real control effect caused by the **field value itself**, not merely by the existence of a forged IDR. The key distinction is that the harmful downstream behavior changes specifically because this timer is overwritten; the field directly poisons subscriber mobility state that the MME later consumes.
+
+The effect is not necessarily immediate at packet receipt time, but delayed application on subsequent NAS/MM behavior still qualifies as exploitable state poisoning. Later legitimate HSS updates or context refresh can overwrite it, so the corruption is not permanent, but persistence for the life of the current subscriber context is plausible and sufficient for abuse.
+
+### **Attack Procedure:**
+1. Establish a Diameter connection to the victim **MME** while impersonating the expected **HSS** peer.
+2. Send an **Insert-Subscriber-Data-Request** for the target subscriber, identified by `User-Name` (IMSI form), with the required Diameter routing/session AVPs.
+3. Include `Subscription-Data` as a grouped AVP and set `Subscribed-Periodic-RAU-TAU-Timer` to a malicious but plausibly valid value chosen to distort periodic mobility updates.
+4. Observe a successful **Insert-Subscriber-Data-Answer** from the MME.
+5. The practical success condition is that subsequent NAS mobility behavior for that UE reflects the altered periodic update timer.
+
+### **Attack Message:**
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "flags": ["R", "P"],
+    "command_code": 319,
+    "application_id": 16777251
+  },
+  "avps": [
+    {
+      "name": "Session-Id",
+      "value": "attacker-hss.example.net;1720456789;1"
+    },
+    {
+      "name": "Auth-Session-State",
+      "value": 1
+    },
+    {
+      "name": "Origin-Host",
+      "value": "fake-hss.example.net"
+    },
+    {
+      "name": "Origin-Realm",
+      "value": "example.net"
+    },
+    {
+      "name": "Destination-Host",
+      "value": "mme01.epc.example.net"
+    },
+    {
+      "name": "Destination-Realm",
+      "value": "epc.example.net"
+    },
+    {
+      "name": "Vendor-Specific-Application-Id",
+      "value": {
+        "Vendor-Id": 10415,
+        "Auth-Application-Id": 16777251
+      }
+    },
+    {
+      "name": "User-Name",
+      "value": "001010123456789"
+    },
+    {
+      "name": "Subscription-Data",
+      "value": {
+        "Subscribed-Periodic-RAU-TAU-Timer": 1
+      }
+    }
+  ]
+}
+```
+
+### **Classification:**
+EXPLOITABLE

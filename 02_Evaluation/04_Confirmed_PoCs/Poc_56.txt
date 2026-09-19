@@ -1,0 +1,142 @@
+**Threat Model:**
+
+- **Attack Assumption:**
+  - The victim is an **S-CSCF** exposing its **Cx Diameter client** role to the Internet.
+  - The attacker can impersonate the **HSS / Diameter Multimedia Server** role and establish an unauthenticated Diameter connection to that S-CSCF.
+  - The victim accepts attacker-crafted **Push-Profile-Request (PPR)** messages on that connection.
+  - The attacker knows a valid **private user identity** in `User-Name` that is already known to the target S-CSCF.
+
+- **Attacker Capability:**
+  - The attacker can only send crafted **PPR requests** to the S-CSCF and receive the corresponding answers.
+  - The attacker cannot intercept or modify legitimate HSS<->S-CSCF traffic.
+  - The attacker has no radio, bearer-plane, or SIP signaling vantage point beyond causing the S-CSCF to consume forged Cx updates.
+  - Any impact must therefore come from the S-CSCF accepting and storing the forged **`SIP-Auth-Data-Item`** for later IMS authentication use.
+
+**Exploitability Analysis:**
+
+Under this threat model:
+
+- The attacker is **not** a real I-CSCF but can impersonate one due to unauthenticated Diameter.
+- By sending an LIR for a target `Public-Identity` with and without `Originating-Request`, the HSS behaves differently:
+  - **Without** `Originating-Request` (and no terminating services, not registered):  
+    - The HSS returns `DIAMETER_ERROR_IDENTITY_NOT_REGISTERED`.  
+    - The attacker learns the identity exists but is not currently registered; no S-CSCF name or capabilities are disclosed.
+  - **With** `Originating-Request`:  
+    - The HSS checks the *entire subscription* for any Public Identity that has an S-CSCF assigned.
+    - If such an S-CSCF exists (e.g., another associated identity is registered), the HSS returns:
+      - The **S-CSCF’s SIP URI** in `Server-Name`.
+      - `DIAMETER_UNREGISTERED_SERVICE`.
+    - Even if no S-CSCF is assigned, it may still return **Server-Capabilities** describing what S-CSCFs are suitable.
+
+This means:
+
+- A single bit (presence of Originating-Request) turns an LIR from:
+  - a “simple status check” giving only an error code, into
+  - a **topology and subscription-state exposure**:
+    - Reveals whether the subscription has *any* currently assigned S-CSCF (even if the queried Public-Identity is not registered).
+    - Reveals the internal **S-CSCF name / SIP URI**, or at least **capability profile**.
+- An unauthenticated Internet host should not have the ability to query the HSS for S-CSCF assignment or capabilities of subscriber profiles. That is **sensitive network-internal information** which can be used to:
+  - Target S-CSCFs directly with SIP or other attacks.
+  - Map which subscribers / subscriptions are provisioned and actively bound to S-CSCFs (subscriber privacy and reconnaissance).
+
+Crucially, this enhanced disclosure is *directly gated* by the **Originating-Request** AVP. With all other AVPs equal and benign, merely including `Originating-Request=ORIGINATING` causes the HSS to reveal more about both subscriber state and S-CSCF topology than it otherwise would.
+
+No persistent subscriber data is modified by this AVP in an LIR, but under the question’s framing, **unauthorized disclosure of subscriber and network-internal information** attributable to a single manipulated AVP is a meaningful negative security impact.
+
+**Conclusion:** Yes – an Internet attacker can exploit the **Originating-Request** AVP in a single LIR to obtain otherwise unavailable S-CSCF assignment or capability information for a subscriber, and hence gain sensitive network reconnaissance.
+
+
+## Attack Procedure
+1. **Choose an attacker identity to impersonate**
+   - Use the I-CSCF-like identity from `attacker_identities`:
+     - `Origin-Host = "icscf1.ims.system.com"`
+     - `Origin-Realm = "ims.system.com"`
+   - This is a plausible Cx client identity the HSS expects.
+2. **Select the victim HSS**
+   - From `network_topology`:
+     - `Destination-Host = "hss.ims.system.com"`
+     - `Destination-Realm = "ims.system.com"`
+3. **Select the target subscriber identity**
+   - Use the provided IMS Public Identity:
+     - `Public-Identity = "sip:460000123456001@ims.system.com"`
+   - Assume (realistically) that:
+     - This identity may currently be *not registered*, but
+     - Another Public Identity in the same subscription (e.g. derived from `Associated-Identities`) may have an S-CSCF assigned.
+4. **Establish a Diameter connection**
+   - Open a TCP/SCTP connection from the attacker host to the HSS’s Cx Diameter port.
+   - Since there is no TLS/IPsec or Diameter peer authentication, the HSS accepts this as a valid peer.
+5. **Craft a minimally valid LIR**
+6. **Exploit the target AVP (Originating-Request)**
+7. **Send the LIR and observe the LIA**
+
+## Attack Message
+
+```json
+{
+  "diameter_header": {
+    "version": 1,
+    "command_code": 302,
+    "application_id": 16777251,
+    "hop_by_hop_id": 123456789,
+    "end_to_end_id": 987654321,
+    "flags": "0x80"
+  },
+  "avps": [
+    {
+      "avp_name": "Session-Id",
+      "avp_value": "icscf1.ims.system.com;1234567890"
+    },
+    {
+      "avp_name": "Vendor-Specific-Application-Id",
+      "grouped_avps": [
+        {
+          "avp_name": "Vendor-Id",
+          "avp_value": 10415
+        },
+        {
+          "avp_name": "Auth-Application-Id",
+          "avp_value": 16777251
+        }
+      ]
+    },
+    {
+      "avp_name": "Auth-Session-State",
+      "avp_value": 1
+    },
+    {
+      "avp_name": "Origin-Host",
+      "avp_value": "icscf1.ims.system.com"
+    },
+    {
+      "avp_name": "Origin-Realm",
+      "avp_value": "ims.system.com"
+    },
+    {
+      "avp_name": "Destination-Host",
+      "avp_value": "hss.ims.system.com"
+    },
+    {
+      "avp_name": "Destination-Realm",
+      "avp_value": "ims.system.com"
+    },
+    {
+      "avp_name": "User-Name",
+      "avp_value": "460000123456001@ims.mnc000.mcc460.3gppnetwork.org"
+    },
+    {
+      "avp_name": "Public-Identity",
+      "avp_value": "sip:460000123456001@ims.system.com"
+    },
+    {
+      "avp_name": "Visited-Network-Identifier",
+      "avp_value": "mcc000.mnc460.3gppnetwork.org"
+    },
+    {
+      "avp_name": "User-Authorization-Type",
+      "avp_value": "REGISTRATION_AND_CAPABILITIES "
+    }
+  ]
+}
+```
+**Classification:**
+- `EXPLOITABLE`
